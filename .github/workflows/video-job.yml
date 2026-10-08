@@ -16,28 +16,28 @@ jobs:
     defaults:
       run:
         shell: powershell
+    env:
+      PYTHONPATH: C:\actions-runner\video-python
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Prepare Python dependencies
+      - name: Verify Python dependencies
         run: |
-          py -m venv .venv
-          .\.venv\Scripts\python.exe -m pip install --disable-pip-version-check yt-dlp Pillow
-          .\.venv\Scripts\python.exe --version
-          .\.venv\Scripts\python.exe -c "import yt_dlp, PIL; print('Dependencies OK')"
+          py --version
+          py -c "import yt_dlp, PIL; print('Dependencies OK')"
       - name: Run video job
         env:
-          GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}
-          GITHUB_REPOSITORY: \${{ github.repository }}
-          GITHUB_EVENT_PATH: \${{ github.event_path }}
-          GITHUB_RUN_URL: https://github.com/\${{ github.repository }}/actions/runs/\${{ github.run_id }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_EVENT_PATH: ${{ github.event_path }}
+          GITHUB_RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          .\.venv\Scripts\python.exe vlog-video-harness-chatgpt-bridge/vlog-video-harness/scripts/github_job_windows.py
+          py vlog-video-harness-chatgpt-bridge/vlog-video-harness/scripts/github_job_windows.py
       - name: Upload video outputs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: video-job-\${{ github.event.issue.number }}
-          path: vlog-video-harness-chatgpt-bridge/vlog-video-harness/output/github-job-\${{ github.event.issue.number }}
+          name: video-job-${{ github.event.issue.number }}
+          path: vlog-video-harness-chatgpt-bridge/vlog-video-harness/output/github-job-${{ github.event.issue.number }}
           if-no-files-found: warn
           retention-days: 7
