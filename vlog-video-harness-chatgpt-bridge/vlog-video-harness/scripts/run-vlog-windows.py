@@ -1,9 +1,27 @@
-import argparse, subprocess, sys
+import argparse, os, shutil, subprocess, sys
 from pathlib import Path
 
 def run(cmd, cwd):
     print("+", " ".join(map(str, cmd)), flush=True)
     subprocess.run(cmd, cwd=cwd, check=True)
+
+def ytdlp_exe():
+    py_path = os.environ.get("PYTHONPATH", "")
+    for base in py_path.split(os.pathsep):
+        if not base:
+            continue
+        root = Path(base)
+        for candidate in (
+            root / "bin" / "yt-dlp.exe",
+            root / "Scripts" / "yt-dlp.exe",
+            root / "yt-dlp.exe",
+        ):
+            if candidate.exists():
+                return str(candidate)
+    found = shutil.which("yt-dlp")
+    if found:
+        return found
+    raise FileNotFoundError("yt-dlp executable not found in PATH or PYTHONPATH target")
 
 def main():
     ap = argparse.ArgumentParser()
@@ -16,6 +34,7 @@ def main():
     root = Path(__file__).resolve().parents[1]
     job = Path(a.out).resolve()
     py = sys.executable
+    ytdlp = ytdlp_exe()
 
     for n in ("source", "subtitles", "frames", "candidates", "final"):
         (job / n).mkdir(parents=True, exist_ok=True)
@@ -23,12 +42,12 @@ def main():
     run([py, str(root / "scripts" / "video_pipeline.py"), a.url,
          "--out", str(job / "source" / "metadata.json")], root)
 
-    run([py, "-m", "yt_dlp",
+    run([ytdlp,
          "--no-playlist", "-f", "bv*+ba/b",
          "--merge-output-format", "mp4",
          "-o", str(job / "source" / "video.%(ext)s"), a.url], root)
 
-    run([py, "-m", "yt_dlp",
+    run([ytdlp,
          "--no-playlist",
          "--write-subs", "--write-auto-subs",
          "--sub-langs", "zh.*,en.*,ja.*,ko.*",
