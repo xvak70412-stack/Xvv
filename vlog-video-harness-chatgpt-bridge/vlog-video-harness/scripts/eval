@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+scripts/doctor
+scripts/check
+scripts/test
+echo "eval: PASS"

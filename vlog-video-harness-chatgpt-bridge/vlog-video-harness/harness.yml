@@ -1,0 +1,27 @@
+version: 1
+name: vlog-video-harness
+description: Codex harness for authorized YouTube/local video processing and verified 3:4 subtitle quote images.
+
+commands:
+  bootstrap: scripts/bootstrap
+  check: scripts/check
+  test: scripts/test
+  eval: scripts/eval
+  doctor: scripts/doctor
+
+documents:
+  agent_instructions: AGENTS.md
+  workflow: docs/workflow.md
+  decisions: docs/decisions.md
+  task_template: tasks/TEMPLATE.md
+
+task_loop:
+  - inspect
+  - plan
+  - implement
+  - verify
+  - handoff
+
+verification:
+  default: scripts/check
+  handoff: scripts/eval

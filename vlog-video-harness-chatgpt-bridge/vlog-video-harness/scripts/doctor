@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -u
+echo "== vlog-video-harness doctor =="
+for cmd in python3 ffmpeg yt-dlp; do
+  if command -v "$cmd" >/dev/null 2>&1; then
+    printf "OK   %-10s %s\n" "$cmd" "$("$cmd" --version 2>/dev/null | head -1)"
+  else
+    printf "MISS %-10s\n" "$cmd"
+  fi
+done
+python3 - <<'PY'
+try:
+    import PIL
+    print("OK   Pillow     " + PIL.__version__)
+except Exception:
+    print("MISS Pillow")
+PY

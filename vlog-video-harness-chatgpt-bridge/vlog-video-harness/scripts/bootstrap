@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -euo pipefail
+python3 -m pip install -U "yt-dlp[default]" Pillow
+echo "Bootstrap complete. FFmpeg must be provided by the system."

@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -euo pipefail
+URL="${1:-}"
+N="${2:-3}"
+MODE="${3:-auto}"
+if [ -z "$URL" ]; then echo "Usage: scripts/run-vlog URL [images=3] [mode=auto|native|script]"; exit 2; fi
+JOB="${HARNESS_JOB_DIR:-$PWD/output/job-$(date +%Y%m%d-%H%M%S)}"
+mkdir -p "$JOB"/{source,subtitles,frames,candidates,final}
+python3 scripts/video_pipeline.py "$URL" --out "$JOB/source/metadata.json"
+yt-dlp --no-playlist -f "bv*+ba/b" --merge-output-format mp4 -o "$JOB/source/video.%(ext)s" "$URL"
+VIDEO="$(find "$JOB/source" -type f -name '*.mp4' | head -1)"
+yt-dlp --no-playlist --write-subs --write-auto-subs --sub-langs "zh.*,en.*,ja.*,ko.*" --sub-format vtt --skip-download -o "$JOB/subtitles/%(id)s.%(ext)s" "$URL" || true
+python3 scripts/sample_frames.py "$VIDEO" "$JOB/frames" --count 48
+python3 scripts/analyze_candidates.py "$VIDEO" "$JOB/subtitles" --images "$N" --mode "$MODE" --out "$JOB/candidates/manifest.json"
+python3 scripts/render_3x4.py "$VIDEO" "$JOB/candidates/manifest.json" --out "$JOB/final" --width 1440
+python3 scripts/qa.py --output "$JOB/final"
+echo "DONE: $JOB"
