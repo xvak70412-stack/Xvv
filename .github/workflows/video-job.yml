@@ -21,8 +21,10 @@ jobs:
         uses: actions/checkout@v4
       - name: Prepare Python dependencies
         run: |
-          py -m pip install --upgrade pip
-          py -m pip install --upgrade yt-dlp Pillow
+          py -m venv .venv
+          .\.venv\Scripts\python.exe -m pip install --disable-pip-version-check yt-dlp Pillow
+          .\.venv\Scripts\python.exe --version
+          .\.venv\Scripts\python.exe -c "import yt_dlp, PIL; print('Dependencies OK')"
       - name: Run video job
         env:
           GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}
@@ -30,7 +32,7 @@ jobs:
           GITHUB_EVENT_PATH: \${{ github.event_path }}
           GITHUB_RUN_URL: https://github.com/\${{ github.repository }}/actions/runs/\${{ github.run_id }}
         run: |
-          py vlog-video-harness-chatgpt-bridge/vlog-video-harness/scripts/github_job_windows.py
+          .\.venv\Scripts\python.exe vlog-video-harness-chatgpt-bridge/vlog-video-harness/scripts/github_job_windows.py
       - name: Upload video outputs
         if: always()
         uses: actions/upload-artifact@v4
