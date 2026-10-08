@@ -12,7 +12,7 @@ def video_id(url: str) -> str:
     return m.group(1)
 
 def ytdlp_cmd(*args):
-    return [sys.executable, "-c", "from yt_dlp import main; main()", *args]
+    return [sys.executable, "-m", "yt_dlp", *args]
 
 def metadata(url: str):
     return json.loads(subprocess.check_output(
@@ -28,14 +28,7 @@ def main():
     a = p.parse_args()
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
     data = metadata(a.url)
-    result = {
-        "id": data.get("id"),
-        "title": data.get("title"),
-        "duration": data.get("duration"),
-        "webpage_url": data.get("webpage_url"),
-        "uploader": data.get("uploader"),
-        "availability": data.get("availability"),
-    }
+    result = {"id": data.get("id"), "title": data.get("title"), "duration": data.get("duration"), "webpage_url": data.get("webpage_url"), "uploader": data.get("uploader"), "availability": data.get("availability")}
     Path(a.out).write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
