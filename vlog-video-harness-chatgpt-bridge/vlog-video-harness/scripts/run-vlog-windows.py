@@ -22,7 +22,7 @@ def main():
         (job / n).mkdir(parents=True, exist_ok=True)
     run([py, str(root / "scripts" / "video_pipeline.py"), a.url, "--out", str(job / "source" / "metadata.json")], root)
     run(ytdlp_cmd("--no-playlist", "-f", "bv*+ba/b", "--merge-output-format", "mp4", "-o", str(job / "source" / "video.%(ext)s"), a.url), root)
-    run(ytdlp_cmd("--no-playlist", "--write-subs", "--write-auto-subs", "--sub-langs", "zh.*,en.*,ja.*,ko.*", "--sub-format", "vtt", "--skip-download", "-o", str(job / "subtitles" / "%(id)s.%(ext)s"), a.url), root)
+    run(ytdlp_cmd("--no-playlist", "--ignore-errors", "--sleep-requests", "1", "--write-subs", "--write-auto-subs", "--sub-langs", "zh.*,en.*,ja.*,ko.*", "--sub-format", "vtt", "--skip-download", "-o", str(job / "subtitles" / "%(id)s.%(ext)s"), a.url), root)
     videos = list((job / "source").glob("*.mp4"))
     if not videos:
         raise RuntimeError("No MP4 video found")
