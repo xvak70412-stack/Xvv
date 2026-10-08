@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Small orchestration helpers. Heavy rendering belongs to the installed video Skill."""
 from __future__ import annotations
-import argparse, json, re, subprocess
+import argparse, json, re, subprocess, sys
 from pathlib import Path
 
 YT_RE = re.compile(r"(?:youtube\.com/watch\?v=|youtu\.be/)([A-Za-z0-9_-]{6,})")
@@ -13,7 +13,8 @@ def video_id(url: str) -> str:
     return m.group(1)
 
 def metadata(url: str):
-    cmd = ["yt-dlp", "--no-playlist", "--dump-single-json", "--skip-download", url]
+    cmd = [sys.executable, "-m", "yt_dlp",
+           "--no-playlist", "--dump-single-json", "--skip-download", url]
     return json.loads(subprocess.check_output(cmd, text=True))
 
 def main():
