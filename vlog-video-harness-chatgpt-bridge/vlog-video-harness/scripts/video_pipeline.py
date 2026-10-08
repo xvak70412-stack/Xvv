@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
-"""Small orchestration helpers. Heavy rendering belongs to the installed video Skill."""
 from __future__ import annotations
-import argparse, json, os, re, shutil, subprocess, sys
+import argparse, json, re, subprocess, sys
 from pathlib import Path
 
 YT_RE = re.compile(r"(?:youtube\.com/watch\?v=|youtu\.be/)([A-Za-z0-9_-]{6,})")
@@ -12,29 +11,14 @@ def video_id(url: str) -> str:
         raise SystemExit("Not a supported YouTube URL")
     return m.group(1)
 
-def ytdlp_exe() -> str:
-    candidates = []
-    py_path = os.environ.get("PYTHONPATH", "")
-    for base in py_path.split(os.pathsep):
-        if not base:
-            continue
-        root = Path(base)
-        candidates.extend([
-            root / "bin" / "yt-dlp.exe",
-            root / "Scripts" / "yt-dlp.exe",
-            root / "yt-dlp.exe",
-        ])
-    found = shutil.which("yt-dlp")
-    if found:
-        return found
-    for candidate in candidates:
-        if candidate.exists():
-            return str(candidate)
-    raise FileNotFoundError("yt-dlp executable not found in PATH or PYTHONPATH target")
+def ytdlp_cmd(*args):
+    return [sys.executable, "-c", "from yt_dlp import main; main()", *args]
 
 def metadata(url: str):
-    cmd = [ytdlp_exe(), "--no-playlist", "--dump-single-json", "--skip-download", url]
-    return json.loads(subprocess.check_output(cmd, text=True))
+    return json.loads(subprocess.check_output(
+        ytdlp_cmd("--no-playlist", "--dump-single-json", "--skip-download", url),
+        text=True
+    ))
 
 def main():
     p = argparse.ArgumentParser()
