@@ -16,15 +16,17 @@ jobs:
     defaults:
       run:
         shell: powershell
-    env:
-      PYTHONPATH: C:\actions-runner\video-python
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Verify Python dependencies
+      - name: Install Python dependencies
         run: |
           & 'C:\Program Files\Python314\python.exe' --version
-          & 'C:\Program Files\Python314\python.exe' -c "import yt_dlp, PIL; print('Dependencies OK')"
+          & 'C:\Program Files\Python314\python.exe' -m pip install --upgrade yt-dlp Pillow
+      - name: Verify Python dependencies
+        run: |
+          & 'C:\Program Files\Python314\python.exe' -c "import yt_dlp, PIL; print('Dependencies OK'); print(yt_dlp.__file__)"
+          & 'C:\Program Files\Python314\python.exe' -m yt_dlp --version
       - name: Run video job
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
