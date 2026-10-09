@@ -2,6 +2,7 @@ import argparse
 import json
 import subprocess
 import tempfile
+import re
 from pathlib import Path
 
 from PIL import Image, ImageOps, ImageDraw, ImageFont
@@ -66,6 +67,25 @@ def wrap_chinese(draw, text, font, max_width):
     return lines
 
 
+def split_caption_lines(text):
+    """把字幕拆成简短句子，避免整段文字重复铺满拼图。"""
+    text = re.sub(r"\s+", "", str(text or ""))
+    parts = re.split(r"(?<=[。！？；，.!?;])", text)
+    result = []
+    for part in parts:
+        part = part.strip(" ，。！？；：,.!?;:")
+        if len(part) >= 4 and part not in result:
+            result.append(part)
+    short = []
+    for part in result:
+        while len(part) > 22:
+            short.append(part[:20])
+            part = part[20:]
+        if part:
+            short.append(part)
+    return short or ([text[:20]] if text else [])
+
+
 def draw_caption_bar(image, text):
     """在截图底部叠加半透明黑底白字字幕。"""
     if not text:
@@ -112,8 +132,11 @@ for n, item in enumerate(m.get("images", []), 1):
     if not times:
         continue
 
-    # 分析脚本已先筛选简体中文字幕，这里直接使用完整金句，不再截断成单行。
-    quote = str(item.get("quote", "")).strip()
+    # 主画面显示重点短句，下方截图条显示不同短句。
+    caption_lines = split_caption_lines(item.get("quote", ""))
+    if not caption_lines:
+        continue
+    quote = caption_lines[0]
 
     with tempfile.TemporaryDirectory() as td:
         td = Path(td)
@@ -131,7 +154,7 @@ for n, item in enumerate(m.get("images", []), 1):
         hero = draw_caption_bar(hero, quote)
         canvas.paste(hero, (0, 0))
 
-        # 下方继续排列截图条，每条叠加同一句金句
+        # 下方继续排列截图条，每条显示不同短句，避免字幕重复
         strip_top = HERO_H
         strip_height = VIDEO_H - HERO_H
         if paths and strip_height > 0:
@@ -145,7 +168,8 @@ for n, item in enumerate(m.get("images", []), 1):
                     continue
                 with Image.open(frame_path) as frame:
                     strip = ImageOps.fit(frame.convert("RGB"), (W, h))
-                    strip = draw_caption_bar(strip, quote)
+                    strip_quote = caption_lines[i + 1] if i + 1 < len(caption_lines) else ""
+                    strip = draw_caption_bar(strip, strip_quote)
                     canvas.paste(strip, (0, y))
         canvas.save(
             o / f"{n:02d}-{item.get('title', f'candidate-{n:02d}')}.jpg",
