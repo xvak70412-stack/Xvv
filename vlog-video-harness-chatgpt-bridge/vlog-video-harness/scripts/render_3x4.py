@@ -2,7 +2,7 @@ import argparse,json,subprocess,tempfile
 from pathlib import Path
 from PIL import Image,ImageOps,ImageDraw
 p=argparse.ArgumentParser();p.add_argument("video");p.add_argument("manifest");p.add_argument("--out");p.add_argument("--width",type=int,default=1440);a=p.parse_args()
-o=Path(a.out);o.mkdir(parents=True,exist_ok=True);m=json.loads(Path(a.manifest).read_text());W=a.width;H=round(W*4/3)
+o=Path(a.out);o.mkdir(parents=True,exist_ok=True);m=json.loads(Path(a.manifest).read_text(encoding="utf-8"));W=a.width;H=round(W*4/3)
 def grab(t,d):
  subprocess.run(["ffmpeg","-y","-ss",str(t),"-i",a.video,"-frames:v","1","-q:v","2",str(d)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,check=True)
 for n,it in enumerate(m["images"],1):
