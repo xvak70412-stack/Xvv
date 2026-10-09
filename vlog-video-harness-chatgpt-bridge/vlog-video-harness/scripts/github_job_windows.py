@@ -47,13 +47,15 @@ def comment(repo, issue, body):
 
 def main():
     event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text(encoding="utf-8"))
-    issue = event["issue"]
-    number = int(issue["number"])
+    event_issue = event["issue"]
+    number = int(event_issue["number"])
     repo = os.environ["GITHUB_REPOSITORY"]
     run_url = os.environ.get("GITHUB_RUN_URL", "")
     out = OUT_ROOT / f"github-job-{number}"
     out.mkdir(parents=True, exist_ok=True)
     try:
+        # Fetch the latest issue body; reruns may contain an older event snapshot.
+        issue = github_api(f"/repos/{repo}/issues/{number}")
         url, mode, images = parse_body(issue.get("body", ""))
         comment(
             repo,
