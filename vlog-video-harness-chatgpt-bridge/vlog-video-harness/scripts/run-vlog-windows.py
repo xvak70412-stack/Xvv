@@ -1,4 +1,4 @@
-import argparse, json, subprocess, sys
+import argparse, json, os, subprocess, sys
 from pathlib import Path
 
 def run(cmd, cwd):
@@ -6,7 +6,11 @@ def run(cmd, cwd):
     return subprocess.run(cmd, cwd=cwd, check=True)
 
 def ytdlp_cmd(*args):
-    return [sys.executable, "-m", "yt_dlp", *args]
+    cmd = [sys.executable, "-m", "yt_dlp"]
+    cookies = Path(r"C:\\actions-runner\\secrets\\cookies.txt")
+    if cookies.is_file():
+        cmd += ["--cookies", str(cookies)]
+    return [*cmd, *args]
 
 def main():
     ap = argparse.ArgumentParser()
@@ -40,7 +44,6 @@ def main():
 
     list_cmd = ytdlp_cmd(
         "--no-playlist",
-        "--cookies-from-browser", "chrome",
         "--list-subs",
         a.url
     )
