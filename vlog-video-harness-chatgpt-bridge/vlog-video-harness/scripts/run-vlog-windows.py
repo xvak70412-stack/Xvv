@@ -64,7 +64,6 @@ def main():
     subtitle_cmd = ytdlp_cmd(
         "--no-playlist",
         "--sleep-requests", "1",
-        "--cookies-from-browser", "chrome",
         "--write-subs", "--write-auto-subs",
         "--sub-langs", "zh.*,en.*,ja.*,ko.*",
         "--sub-format", "vtt",
