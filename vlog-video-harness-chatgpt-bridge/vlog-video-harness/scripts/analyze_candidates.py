@@ -10,7 +10,7 @@ HAN = re.compile(r"[\u4e00-\u9fff]")
 HANGUL = re.compile(r"[\uac00-\ud7af]")
 LATIN = re.compile(r"[A-Za-z]")
 # Common traditional-only forms; reject these rather than silently output Traditional Chinese.
-TRADITIONAL_ONLY = set("體學說會這個們為與時對從來後發現實開關點無過還進應當讓經過問題總結認為覺得聽話愛國書讀寫長見頭場種業辦東車電風雲萬裏樣買賣請謝歡難處號選擇親親")
+TRADITIONAL_ONLY = set("體學說會這個們為與時對從後發現實開關點無還進應當讓經問題總結認覺聽讀寫見場種業辦電愛國謝歡號選擇親")
 CN_KEYWORDS = ("因为", "但是", "所以", "其实", "如果", "不要", "一定", "重要", "生活", "工作", "改变", "永远", "从来", "自己", "人生", "成长", "选择", "相信", "努力", "成功", "失败", "坚持", "价值", "关系", "人性", "真正", "意味着", "记住", "只有", "才能", "学会", "自由", "勇敢", "恐惧", "幸福", "痛苦", "世界", "别人", "内心")
 
 def sec(x):
@@ -125,7 +125,7 @@ def main():
         parsed = cues(f)
         if parsed:
             name = f.name.lower()
-            lang_bonus = 1000 if any(tag in name for tag in ("zh-hans", "zh_cn", "zh-cn", "zh-hant", "zh-tw", "zh")) else 0
+            lang_bonus = 1000 if any(tag in name for tag in ("zh-hans", "zh_cn", "zh-cn", "zh")) and not any(tag in name for tag in ("zh-hant", "zh_tw", "zh-tw", "zh-hk")) else 0
             file_cues.append((lang_bonus + len(parsed), f, parsed))
     file_cues.sort(key=lambda x: x[0], reverse=True)
     selected_file = file_cues[0][1] if file_cues else None
