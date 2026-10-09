@@ -7,7 +7,7 @@ def run(cmd, cwd):
 
 def ytdlp_cmd(*args):
     cmd = [sys.executable, "-m", "yt_dlp"]
-    cookies = Path(r"C:\\actions-runner\\secrets\\cookies.txt")
+    cookies = Path("C:/actions-runner/secrets/cookies.txt")
     if cookies.is_file():
         cmd += ["--cookies", str(cookies)]
     return [*cmd, *args]
