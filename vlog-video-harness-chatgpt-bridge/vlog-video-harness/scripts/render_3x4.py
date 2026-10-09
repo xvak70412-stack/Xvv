@@ -20,9 +20,8 @@ m = json.loads(Path(a.manifest).read_text(encoding="utf-8"))
 W = a.width
 H = round(W * 4 / 3)
 
-# 上方保留原来的拼图效果，下方独立留白放简体中文金句
-VIDEO_H = round(H * 0.70)
-TEXT_H = H - VIDEO_H
+# 保留原来的拼图布局，字幕直接叠加在画面上
+VIDEO_H = H
 HERO_H = round(VIDEO_H * 0.70)
 
 
@@ -67,38 +66,46 @@ def wrap_chinese(draw, text, font, max_width):
     return lines
 
 
-def draw_quote(canvas, text):
+def draw_caption_bar(image, text):
+    """在截图底部叠加半透明黑底白字字幕。"""
     if not text:
-        return
+        return image
 
-    draw = ImageDraw.Draw(canvas)
-    margin_x = round(W * 0.07)
-    margin_y = round(TEXT_H * 0.10)
-    max_width = W - margin_x * 2
-    font_size = max(24, round(W * 0.045))
-    min_font_size = max(20, round(W * 0.026))
+    overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+    max_width = round(image.width * 0.92)
+    font_size = max(16, round(W * 0.034))
+    min_font_size = max(14, round(W * 0.020))
 
     while font_size >= min_font_size:
         font = load_font(font_size)
         lines = wrap_chinese(draw, text, font, max_width)
-        line_height = draw.textbbox((0, 0), "中文Ag", font=font)[3] + 8
-        if len(lines) * line_height <= TEXT_H - margin_y * 2:
+        line_height = draw.textbbox((0, 0), "中文Ag", font=font)[3] + 4
+        if len(lines) <= 2 and len(lines) * line_height <= image.height * 0.72:
             break
         font_size -= 2
 
     font = load_font(max(font_size, min_font_size))
     lines = wrap_chinese(draw, text, font, max_width)
-    line_height = draw.textbbox((0, 0), "中文Ag", font=font)[3] + 8
+    line_height = draw.textbbox((0, 0), "中文Ag", font=font)[3] + 4
+    # 若单条截图太矮，只显示最后一行，避免字幕挤满画面
+    max_lines = max(1, min(2, int(image.height * 0.72 // max(1, line_height))))
+    lines = lines[-max_lines:]
     total_height = len(lines) * line_height
-    y = VIDEO_H + max(0, (TEXT_H - total_height) // 2)
+    pad_y = max(3, round(font_size * 0.22))
+    y0 = max(0, image.height - total_height - pad_y * 2)
 
+    draw.rectangle((0, y0, image.width, image.height), fill=(0, 0, 0, 175))
+    y = y0 + pad_y
     for line in lines:
-        bbox = draw.textbbox((0, 0), line, font=font)
+        bbox = draw.textbbox((0, 0), line, font=font, stroke_width=1)
         text_width = bbox[2] - bbox[0]
-        x = (W - text_width) // 2
-        draw.text((x, y), line, font=font, fill=(15, 15, 15))
+        x = (image.width - text_width) // 2
+        draw.text((x, y), line, font=font, fill="white",
+                  stroke_width=1, stroke_fill="black")
         y += line_height
 
+    return Image.alpha_composite(image.convert("RGBA"), overlay).convert("RGB")
 
 for n, item in enumerate(m.get("images", []), 1):
     times = item.get("times", [])
@@ -118,12 +125,13 @@ for n, item in enumerate(m.get("images", []), 1):
 
         canvas = Image.new("RGB", (W, H), "white")
 
-        # 主截图占拼图区域上方约 70%
+        # 主截图放在拼图顶部，并叠加白字黑底中文字幕
         hero = Image.open(paths[0]).convert("RGB")
         hero = ImageOps.fit(hero, (W, HERO_H))
+        hero = draw_caption_bar(hero, quote)
         canvas.paste(hero, (0, 0))
 
-        # 余下区域按时间顺序排列截图条，保留原拼图风格
+        # 下方继续排列截图条，每条叠加同一句金句
         strip_top = HERO_H
         strip_height = VIDEO_H - HERO_H
         if paths and strip_height > 0:
@@ -137,9 +145,8 @@ for n, item in enumerate(m.get("images", []), 1):
                     continue
                 with Image.open(frame_path) as frame:
                     strip = ImageOps.fit(frame.convert("RGB"), (W, h))
+                    strip = draw_caption_bar(strip, quote)
                     canvas.paste(strip, (0, y))
-
-        draw_quote(canvas, quote)
         canvas.save(
             o / f"{n:02d}-{item.get('title', f'candidate-{n:02d}')}.jpg",
             quality=95,
