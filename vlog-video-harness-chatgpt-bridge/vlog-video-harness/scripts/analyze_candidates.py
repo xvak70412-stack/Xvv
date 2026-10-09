@@ -11,7 +11,8 @@ HANGUL = re.compile(r"[\uac00-\ud7af]")
 LATIN = re.compile(r"[A-Za-z]")
 # Common traditional-only forms; reject these rather than silently output Traditional Chinese.
 TRADITIONAL_ONLY = set("體學說會這個們為與時對從後發現實開關點無還進應當讓經問題總結認覺聽讀寫見場種業辦電愛國謝歡號選擇親")
-CN_KEYWORDS = ("因为", "但是", "所以", "其实", "如果", "不要", "一定", "重要", "生活", "工作", "改变", "永远", "从来", "自己", "人生", "成长", "选择", "相信", "努力", "成功", "失败", "坚持", "价值", "关系", "人性", "真正", "意味着", "记住", "只有", "才能", "学会", "自由", "勇敢", "恐惧", "幸福", "痛苦", "世界", "别人", "内心")
+CN_KEYWORDS = ("因为", "但是", "所以", "其实", "如果", "不要", "一定", "重要", "生活", "工作", "改变", "永远", "从来", "自己", "人生", "成长", "选择", "相信", "努力", "成功", "失败", "坚持", "价值", "关系", "人性", "真正", "意味着", "记住", "只有", "才能", "学会", "自由", "勇敢", "恐惧", "幸福", "痛苦", "世界", "别人", "内心", "本质", "原因", "结果", "关键", "能力", "时间", "目标", "经验", "思考", "理解", "责任", "尊重", "习惯", "决定", "机会", "问题", "答案", "意义", "值得")
+BAD_FRAGMENTS = ("当你不", "的时候当你", "准备好", "在我们", "他们并非", "我知道自己的", "我知道我", "真正的那个时候", "情况。所以", "保密协议", "如果我做某事", "谢谢大家", "欢迎回来", "订阅点赞", "大家好")
 
 def sec(x):
     h, mi, se = x.replace(",", ".").split(":")
@@ -56,21 +57,30 @@ def cues(path):
     return out
 
 def score(text):
+    """偏向完整、有观点的中文句子，而不是口语碎片或普通对话。"""
+    text = re.sub(r"\\s+", "", text)
     n = len(text)
-    s = min(n, 100) / 18.0
-    if 12 <= n <= 55:
-        s += 2.5
-    if any(p in text for p in ("。", "！", "？", "；")):
-        s += 1.5
-    if any(k in text for k in CN_KEYWORDS):
-        s += 2.5
-    if any(k in text for k in ("不是", "而是", "真正", "本质", "原因", "结果", "意味着", "关键", "记住", "值得", "必须", "从不", "永远")):
-        s += 1.5
-    # Penalize likely fragments and very short conversational fillers.
-    if len(text) < 10:
+    s = 0.0
+    if 16 <= n <= 42:
+        s += 5
+    elif 10 <= n <= 55:
+        s += 2
+    else:
         s -= 3
-    if any(f in text for f in ("嗯嗯", "哈哈", "谢谢大家", "欢迎回来", "订阅点赞")):
-        s -= 5
+    if text.endswith(("。", "！", "？", "；")):
+        s += 4
+    elif text.endswith(("，", "、", "：", "…")):
+        s -= 3
+    if any(k in text for k in CN_KEYWORDS):
+        s += 3
+    if any(k in text for k in ("不是", "而是", "真正", "本质", "原因", "结果", "意味着", "关键", "记住", "值得", "必须", "从不", "永远", "只有", "才能", "因为", "所以", "但是")):
+        s += 3
+    if any(k in text for k in ("我觉得", "我认为", "我知道", "你知道", "他说", "她说", "然后", "那个时候", "情况", "对吧", "是吧", "嗯", "啊")):
+        s -= 2
+    if any(k in text for k in BAD_FRAGMENTS):
+        s -= 8
+    if len(set(text)) <= max(3, n // 5):
+        s -= 4
     return s
 
 def make_candidates(all_cues, images):
@@ -89,6 +99,8 @@ def make_candidates(all_cues, images):
                 break
         text = "".join(c["text"] for c in group).strip()
         if len(text) < 10 or not is_simplified_chinese(text):
+            continue
+        if text.endswith(("，", "、", "：", "…")) or any(bad in text for bad in BAD_FRAGMENTS):
             continue
         windows.append({
             "start": group[0]["start"],
@@ -145,7 +157,7 @@ def main():
         "mode": a.mode,
         "subtitle_files": [str(selected_file)] if selected_file else [],
         "subtitle_cue_count": len(all_cues),
-        "selection": "simplified_chinese_quote_v2",
+        "selection": "simplified_chinese_quote_quality_v3",
         "needs_native_pixel_confirmation": a.mode == "auto",
         "images": images,
     }
