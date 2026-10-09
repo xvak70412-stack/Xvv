@@ -1,6 +1,5 @@
 import argparse
 import json
-import re
 import subprocess
 import tempfile
 from pathlib import Path
@@ -21,70 +20,20 @@ m = json.loads(Path(a.manifest).read_text(encoding="utf-8"))
 W = a.width
 H = round(W * 4 / 3)
 
-# 画面区域：保留视频画面；字幕单独放在底部白色区域
-VIDEO_H = round(H * 0.76)
+# 上方保留原来的拼图效果，下方独立留白放简体中文金句
+VIDEO_H = round(H * 0.70)
 TEXT_H = H - VIDEO_H
+HERO_H = round(VIDEO_H * 0.70)
 
 
 def grab(t, dest):
     subprocess.run(
-        [
-            "ffmpeg", "-y", "-ss", str(t), "-i", a.video,
-            "-frames:v", "1", "-q:v", "2", str(dest)
-        ],
+        ["ffmpeg", "-y", "-ss", str(t), "-i", a.video,
+         "-frames:v", "1", "-q:v", "2", str(dest)],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         check=True,
     )
-
-
-def is_chinese_char(ch):
-    return "\u4e00" <= ch <= "\u9fff"
-
-
-def chinese_quote(item):
-    """只提取简体中文金句，不把其他语言拼进去。"""
-    candidates = []
-
-    # 优先使用原始字幕行，而不是混合语言的 quote
-    for line in item.get("lines", []):
-        if not isinstance(line, str):
-            continue
-
-        line = line.strip()
-        if not line:
-            continue
-
-        # 去掉不属于中文金句的字符，只保留中文、常用标点和数字
-        cleaned = "".join(
-            ch for ch in line
-            if is_chinese_char(ch)
-            or ch in "，。！？；：、（）《》“”‘’—… "
-            or ch.isdigit()
-        ).strip()
-
-        chinese_count = sum(is_chinese_char(ch) for ch in cleaned)
-        if chinese_count >= 4:
-            candidates.append((chinese_count, cleaned))
-
-    # 选择中文信息最多的一行，避免把韩文、英文混入字幕
-    if candidates:
-        candidates.sort(key=lambda x: x[0], reverse=True)
-        return candidates[0][1]
-
-    # 备用：如果只有 quote 字段，则只保留其中的中文字符和中文标点
-    quote = item.get("quote", "")
-    if isinstance(quote, str):
-        cleaned = "".join(
-            ch for ch in quote
-            if is_chinese_char(ch)
-            or ch in "，。！？；：、（）《》“”‘’—… "
-            or ch.isdigit()
-        ).strip()
-        if sum(is_chinese_char(ch) for ch in cleaned) >= 4:
-            return cleaned
-
-    return ""
 
 
 def load_font(size):
@@ -106,7 +55,6 @@ def load_font(size):
 def wrap_chinese(draw, text, font, max_width):
     lines = []
     current = ""
-
     for ch in text:
         trial = current + ch
         if current and draw.textbbox((0, 0), trial, font=font)[2] > max_width:
@@ -114,10 +62,8 @@ def wrap_chinese(draw, text, font, max_width):
             current = ch
         else:
             current = trial
-
     if current:
         lines.append(current)
-
     return lines
 
 
@@ -127,9 +73,8 @@ def draw_quote(canvas, text):
 
     draw = ImageDraw.Draw(canvas)
     margin_x = round(W * 0.07)
-    margin_y = round(TEXT_H * 0.12)
+    margin_y = round(TEXT_H * 0.10)
     max_width = W - margin_x * 2
-
     font_size = max(24, round(W * 0.045))
     min_font_size = max(20, round(W * 0.026))
 
@@ -137,16 +82,13 @@ def draw_quote(canvas, text):
         font = load_font(font_size)
         lines = wrap_chinese(draw, text, font, max_width)
         line_height = draw.textbbox((0, 0), "中文Ag", font=font)[3] + 8
-
         if len(lines) * line_height <= TEXT_H - margin_y * 2:
             break
-
         font_size -= 2
 
     font = load_font(max(font_size, min_font_size))
     lines = wrap_chinese(draw, text, font, max_width)
     line_height = draw.textbbox((0, 0), "中文Ag", font=font)[3] + 8
-
     total_height = len(lines) * line_height
     y = VIDEO_H + max(0, (TEXT_H - total_height) // 2)
 
@@ -163,34 +105,47 @@ for n, item in enumerate(m.get("images", []), 1):
     if not times:
         continue
 
-    quote = chinese_quote(item)
+    # 分析脚本已先筛选简体中文字幕，这里直接使用完整金句，不再截断成单行。
+    quote = str(item.get("quote", "")).strip()
 
     with tempfile.TemporaryDirectory() as td:
         td = Path(td)
-        hero_path = td / "hero.jpg"
-        grab(times[0], hero_path)
+        paths = []
+        for i, t in enumerate(times):
+            frame_path = td / f"frame-{i:02d}.jpg"
+            grab(t, frame_path)
+            paths.append(frame_path)
 
         canvas = Image.new("RGB", (W, H), "white")
 
-        # 上方保留主画面，采用等比例裁切填充
-        hero = Image.open(hero_path).convert("RGB")
-        hero = ImageOps.fit(hero, (W, VIDEO_H))
+        # 主截图占拼图区域上方约 70%
+        hero = Image.open(paths[0]).convert("RGB")
+        hero = ImageOps.fit(hero, (W, HERO_H))
         canvas.paste(hero, (0, 0))
 
-        # 只在底部白色区域绘制中文金句
-        draw_quote(canvas, quote)
+        # 余下区域按时间顺序排列截图条，保留原拼图风格
+        strip_top = HERO_H
+        strip_height = VIDEO_H - HERO_H
+        if paths and strip_height > 0:
+            each_h = max(1, strip_height // len(paths))
+            for i, frame_path in enumerate(paths):
+                y = strip_top + i * each_h
+                if y >= VIDEO_H:
+                    break
+                h = (VIDEO_H - y) if i == len(paths) - 1 else min(each_h, VIDEO_H - y)
+                if h <= 0:
+                    continue
+                with Image.open(frame_path) as frame:
+                    strip = ImageOps.fit(frame.convert("RGB"), (W, h))
+                    canvas.paste(strip, (0, y))
 
+        draw_quote(canvas, quote)
         canvas.save(
             o / f"{n:02d}-{item.get('title', f'candidate-{n:02d}')}.jpg",
             quality=95,
         )
 
-# 生成联系表
-images = sorted(
-    p for p in o.glob("*.jpg")
-    if p.name != "contact_sheet.jpg"
-)
-
+images = sorted(p for p in o.glob("*.jpg") if p.name != "contact_sheet.jpg")
 if images:
     thumbs = []
     for image_path in images:
@@ -200,11 +155,9 @@ if images:
 
     sheet = Image.new("RGB", (360 * len(thumbs), 520), "white")
     draw = ImageDraw.Draw(sheet)
-
     for i, (name, im) in enumerate(thumbs):
         sheet.paste(im, (i * 360, 0))
         draw.text((i * 360 + 5, 490), name, fill="black")
-
     sheet.save(o / "contact_sheet.jpg", quality=92)
 
 print("render complete")
