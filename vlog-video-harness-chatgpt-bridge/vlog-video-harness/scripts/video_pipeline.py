@@ -12,7 +12,11 @@ def video_id(url: str) -> str:
     return m.group(1)
 
 def ytdlp_cmd(*args):
-    return [sys.executable, "-m", "yt_dlp", *args]
+    cmd = [sys.executable, "-m", "yt_dlp"]
+    cookies = Path("C:/actions-runner/secrets/cookies.txt")
+    if cookies.is_file():
+        cmd.extend(["--cookies", str(cookies)])
+    return [*cmd, *args]
 
 def metadata(url: str):
     return json.loads(subprocess.check_output(
