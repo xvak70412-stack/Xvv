@@ -70,20 +70,36 @@ def wrap_chinese(draw, text, font, max_width):
 def split_caption_lines(text):
     """把字幕拆成简短句子，避免整段文字重复铺满拼图。"""
     text = re.sub(r"\s+", "", str(text or ""))
-    parts = re.split(r"(?<=[。！？；，.!?;])", text)
+    # 先按完整句号/问号/感叹号分句，不在逗号处切断意思
+    parts = re.split(r"(?<=[。！？!?])", text)
     result = []
     for part in parts:
         part = part.strip(" ，。！？；：,.!?;:")
-        if len(part) >= 4 and part not in result:
+        if len(part) >= 5 and part not in result:
             result.append(part)
+    # 若字幕没有完整句末标点，再按逗号组成较长的语意片段
+    if len(result) <= 1 and len(text) > 26:
+        result = []
+        current = ""
+        for piece in re.split(r"(?<=[，,；;])", text):
+            if current and len(current) + len(piece) > 24:
+                result.append(current.strip(" ，,；;"))
+                current = piece
+            else:
+                current += piece
+        if current:
+            result.append(current.strip(" ，,；;"))
+    # 句子过长时才切分，尽量在逗号等自然停顿处断开
     short = []
     for part in result:
-        while len(part) > 22:
-            short.append(part[:20])
-            part = part[20:]
+        while len(part) > 24:
+            cut = max(part.rfind(mark, 12, 24) for mark in "，,；;、")
+            cut = cut + 1 if cut >= 12 else 22
+            short.append(part[:cut].strip())
+            part = part[cut:].strip()
         if part:
             short.append(part)
-    return short or ([text[:20]] if text else [])
+    return short or ([text[:22]] if text else [])
 
 
 def draw_caption_bar(image, text):
@@ -154,21 +170,23 @@ for n, item in enumerate(m.get("images", []), 1):
         hero = draw_caption_bar(hero, quote)
         canvas.paste(hero, (0, 0))
 
-        # 下方继续排列截图条，每条显示不同短句，避免字幕重复
+        # 下方最多保留 3 条截图条，字幕短句与画面对应，避免画面过碎
         strip_top = HERO_H
         strip_height = VIDEO_H - HERO_H
-        if paths and strip_height > 0:
-            each_h = max(1, strip_height // len(paths))
-            for i, frame_path in enumerate(paths):
+        strip_paths = paths[1:4] if len(paths) > 1 else []
+        if strip_paths and strip_height > 0:
+            each_h = max(1, strip_height // len(strip_paths))
+            for i, frame_path in enumerate(strip_paths):
                 y = strip_top + i * each_h
                 if y >= VIDEO_H:
                     break
-                h = (VIDEO_H - y) if i == len(paths) - 1 else min(each_h, VIDEO_H - y)
+                h = (VIDEO_H - y) if i == len(strip_paths) - 1 else min(each_h, VIDEO_H - y)
                 if h <= 0:
                     continue
                 with Image.open(frame_path) as frame:
                     strip = ImageOps.fit(frame.convert("RGB"), (W, h))
-                    strip_quote = caption_lines[i + 1] if i + 1 < len(caption_lines) else ""
+                    caption_index = i + 1
+                    strip_quote = caption_lines[caption_index] if caption_index < len(caption_lines) else ""
                     strip = draw_caption_bar(strip, strip_quote)
                     canvas.paste(strip, (0, y))
         canvas.save(
