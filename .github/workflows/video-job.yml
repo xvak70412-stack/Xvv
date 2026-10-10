@@ -46,7 +46,8 @@ jobs:
           name: video-job-${{ github.event.issue.number }}
           path: |
             vlog-video-harness-chatgpt-bridge/vlog-video-harness/output/github-job-${{ github.event.issue.number }}/final
-            vlog-video-harness-chatgpt-bridge/vlog-video-harness/output/github-job-${{ github.event.issue.number }}/candidates/manifest.json
+            vlog-video-harness-chatgpt-bridge/vlog-video-harness/output/github-job-${{ github.event.issue.number }}/subtitles/*.vtt
+            vlog-video-harness-chatgpt-bridge/vlog-video-harness/output/github-job-${{ github.event.issue.number }}/subtitles/subtitle-summary.json
             vlog-video-harness-chatgpt-bridge/vlog-video-harness/output/github-job-${{ github.event.issue.number }}/source/metadata.json
           if-no-files-found: warn
           retention-days: 7
