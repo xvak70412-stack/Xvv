@@ -2,7 +2,6 @@ import argparse
 import json
 import subprocess
 import tempfile
-import re
 from pathlib import Path
 
 from PIL import Image, ImageOps, ImageDraw, ImageFont
@@ -67,93 +66,13 @@ def wrap_chinese(draw, text, font, max_width):
     return lines
 
 
-def split_caption_lines(text):
-    """把字幕拆成简短句子，避免整段文字重复铺满拼图。"""
-    text = re.sub(r"\s+", "", str(text or ""))
-    # 先按完整句号/问号/感叹号分句，不在逗号处切断意思
-    parts = re.split(r"(?<=[。！？!?])", text)
-    result = []
-    for part in parts:
-        part = part.strip(" ，。！？；：,.!?;:")
-        if len(part) >= 5 and part not in result:
-            result.append(part)
-    # 若字幕没有完整句末标点，再按逗号组成较长的语意片段
-    if len(result) <= 1 and len(text) > 26:
-        result = []
-        current = ""
-        for piece in re.split(r"(?<=[，,；;])", text):
-            if current and len(current) + len(piece) > 24:
-                result.append(current.strip(" ，,；;"))
-                current = piece
-            else:
-                current += piece
-        if current:
-            result.append(current.strip(" ，,；;"))
-    # 句子过长时才切分，尽量在逗号等自然停顿处断开
-    short = []
-    for part in result:
-        while len(part) > 24:
-            cut = max(part.rfind(mark, 12, 24) for mark in "，,；;、")
-            cut = cut + 1 if cut >= 12 else 22
-            short.append(part[:cut].strip())
-            part = part[cut:].strip()
-        if part:
-            short.append(part)
-    return short or ([text[:22]] if text else [])
-
-
-def draw_caption_bar(image, text):
-    """在截图底部叠加半透明黑底白字字幕。"""
-    if not text:
-        return image
-
-    overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
-    draw = ImageDraw.Draw(overlay)
-    max_width = round(image.width * 0.92)
-    font_size = max(16, round(W * 0.034))
-    min_font_size = max(14, round(W * 0.020))
-
-    while font_size >= min_font_size:
-        font = load_font(font_size)
-        lines = wrap_chinese(draw, text, font, max_width)
-        line_height = draw.textbbox((0, 0), "中文Ag", font=font)[3] + 4
-        if len(lines) <= 2 and len(lines) * line_height <= image.height * 0.72:
-            break
-        font_size -= 2
-
-    font = load_font(max(font_size, min_font_size))
-    lines = wrap_chinese(draw, text, font, max_width)
-    line_height = draw.textbbox((0, 0), "中文Ag", font=font)[3] + 4
-    # 若单条截图太矮，只显示最后一行，避免字幕挤满画面
-    max_lines = max(1, min(2, int(image.height * 0.72 // max(1, line_height))))
-    lines = lines[-max_lines:]
-    total_height = len(lines) * line_height
-    pad_y = max(3, round(font_size * 0.22))
-    y0 = max(0, image.height - total_height - pad_y * 2)
-
-    draw.rectangle((0, y0, image.width, image.height), fill=(0, 0, 0, 175))
-    y = y0 + pad_y
-    for line in lines:
-        bbox = draw.textbbox((0, 0), line, font=font, stroke_width=1)
-        text_width = bbox[2] - bbox[0]
-        x = (image.width - text_width) // 2
-        draw.text((x, y), line, font=font, fill="white",
-                  stroke_width=1, stroke_fill="black")
-        y += line_height
-
-    return Image.alpha_composite(image.convert("RGBA"), overlay).convert("RGB")
 
 for n, item in enumerate(m.get("images", []), 1):
     times = item.get("times", [])
     if not times:
         continue
 
-    # 主画面显示重点短句，下方截图条显示不同短句。
-    caption_lines = split_caption_lines(item.get("quote", ""))
-    if not caption_lines:
-        continue
-    quote = caption_lines[0]
-
+    # 只生成无字幕拼图；字幕翻译和金句后续单独处理。
     with tempfile.TemporaryDirectory() as td:
         td = Path(td)
         paths = []
@@ -164,13 +83,12 @@ for n, item in enumerate(m.get("images", []), 1):
 
         canvas = Image.new("RGB", (W, H), "white")
 
-        # 主截图放在拼图顶部，并叠加白字黑底中文字幕
+        # 主截图放在拼图顶部，不叠加字幕
         hero = Image.open(paths[0]).convert("RGB")
         hero = ImageOps.fit(hero, (W, HERO_H))
-        hero = draw_caption_bar(hero, quote)
         canvas.paste(hero, (0, 0))
 
-        # 下方最多保留 3 条截图条，字幕短句与画面对应，避免画面过碎
+        # 下方最多保留 3 条截图条，不叠加字幕
         strip_top = HERO_H
         strip_height = VIDEO_H - HERO_H
         strip_paths = paths[1:4] if len(paths) > 1 else []
@@ -185,9 +103,6 @@ for n, item in enumerate(m.get("images", []), 1):
                     continue
                 with Image.open(frame_path) as frame:
                     strip = ImageOps.fit(frame.convert("RGB"), (W, h))
-                    caption_index = i + 1
-                    strip_quote = caption_lines[caption_index] if caption_index < len(caption_lines) else ""
-                    strip = draw_caption_bar(strip, strip_quote)
                     canvas.paste(strip, (0, y))
         canvas.save(
             o / f"{n:02d}-{item.get('title', f'candidate-{n:02d}')}.jpg",
