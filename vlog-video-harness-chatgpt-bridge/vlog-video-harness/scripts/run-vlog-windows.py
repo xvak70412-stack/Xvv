@@ -1,125 +1,235 @@
-import argparse, json, os, subprocess, sys
+import argparse
+import subprocess
+import sys
 from pathlib import Path
 
+
 def run(cmd, cwd):
-    print("+", " ".join(map(str, cmd)), flush=True)
-    return subprocess.run(cmd, cwd=cwd, check=True)
+    print("\nRUN:", " ".join(map(str, cmd)), flush=True)
+    subprocess.run(cmd, cwd=cwd, check=True)
+
 
 def ytdlp_cmd(*args):
-    cmd = [sys.executable, "-m", "yt_dlp"]
+    cmd = [
+        sys.executable,
+        "-m",
+        "yt_dlp"
+    ]
+
     cookies = Path("C:/actions-runner/secrets/cookies.txt")
+
     if cookies.is_file():
-        cmd += ["--cookies", str(cookies)]
+        cmd += [
+            "--cookies",
+            str(cookies)
+        ]
+
     return [*cmd, *args]
 
+
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("url")
-    ap.add_argument("images", type=int)
-    ap.add_argument("mode", choices=["auto", "native", "script"])
-    ap.add_argument("--out", required=True)
-    a = ap.parse_args()
+
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument("url")
+    parser.add_argument("images", type=int)
+    parser.add_argument(
+        "mode",
+        choices=["auto", "native", "script"]
+    )
+
+    parser.add_argument(
+        "--out",
+        required=True
+    )
+
+    args = parser.parse_args()
+
+
     root = Path(__file__).resolve().parents[1]
-    job = Path(a.out).resolve()
+
+    job = Path(args.out).resolve()
+
     py = sys.executable
 
-    for n in ("source", "subtitles", "frames", "candidates", "final"):
-        (job / n).mkdir(parents=True, exist_ok=True)
 
-    run([
-        py, str(root / "scripts" / "video_pipeline.py"), a.url,
-        "--out", str(job / "source" / "metadata.json")
-    ], root)
+    # 创建输出目录
 
-    run(ytdlp_cmd(
-        "--no-playlist", "-f", "bv*+ba/b",
-        "--merge-output-format", "mp4",
-        "-o", str(job / "source" / "video.%(ext)s"), a.url
-    ), root)
-
-    # YouTube may require an authenticated browser session for subtitle tracks.
-    # First record the subtitle tracks yt-dlp can actually see, then download them.
-    env = None
-    subtitle_log = job / "subtitles" / "ytdlp-subs.txt"
-
-    list_cmd = ytdlp_cmd(
-        "--no-playlist",
-        "--list-subs",
-        a.url
-    )
-    print("+", " ".join(map(str, list_cmd)), flush=True)
-    listed = subprocess.run(
-        list_cmd, cwd=root, text=True, capture_output=True
-    )
-    subtitle_log.write_text(
-        "=== yt-dlp --list-subs ===\n"
-        + listed.stdout
-        + "\n=== STDERR ===\n"
-        + listed.stderr,
-        encoding="utf-8",
-    )
-    print(listed.stdout, end="", flush=True)
-    print(listed.stderr, end="", file=sys.stderr, flush=True)
-
-    subtitle_cmd = ytdlp_cmd(
-        "--no-playlist",
-        "--sleep-requests", "1",
-        "--write-subs", "--write-auto-subs",
-        "--sub-langs", "zh.*,en.*,ja.*,ko.*",
-        "--sub-format", "vtt",
-        "--skip-download",
-        "-o", str(job / "subtitles" / "%(id)s.%(ext)s"),
-        a.url,
-    )
-    run(subtitle_cmd, root)
-
-    subtitle_files = sorted(job.joinpath("subtitles").glob("*.vtt"))
-    if not subtitle_files:
-        raise RuntimeError(
-            "No VTT subtitle files were downloaded. "
-            f"See {subtitle_log} for the exact yt-dlp subtitle-track response."
+    for folder in [
+        "source",
+        "subtitles",
+        "frames"
+    ]:
+        (job / folder).mkdir(
+            parents=True,
+            exist_ok=True
         )
 
-    (job / "subtitles" / "subtitle-summary.json").write_text(
-        json.dumps(
-            {
-                "count": len(subtitle_files),
-                "files": [p.name for p in subtitle_files],
-                "list_subs_returncode": listed.returncode,
-            },
-            ensure_ascii=False,
-            indent=2,
+
+    # -------------------------
+    # 1. 下载视频
+    # -------------------------
+
+    print("\nSTEP 1: Download video", flush=True)
+
+
+    run(
+        ytdlp_cmd(
+            "--no-playlist",
+
+            # 限制1080p，避免超大文件
+            "-f",
+            "bv*[height<=1080]+ba/b",
+
+            "--merge-output-format",
+            "mp4",
+
+            "-o",
+            str(
+                job /
+                "source" /
+                "video.%(ext)s"
+            ),
+
+            args.url
         ),
-        encoding="utf-8",
+        root
     )
 
-    videos = list((job / "source").glob("*.mp4"))
+
+    print("Video downloaded", flush=True)
+
+
+
+    # -------------------------
+    # 2. 下载字幕
+    # -------------------------
+
+    print("\nSTEP 2: Download subtitles", flush=True)
+
+
+    run(
+        ytdlp_cmd(
+            "--no-playlist",
+
+            "--write-subs",
+
+            "--write-auto-subs",
+
+            "--sub-langs",
+            "zh.*,en.*",
+
+            "--sub-format",
+            "vtt",
+
+            "--skip-download",
+
+            "-o",
+            str(
+                job /
+                "subtitles" /
+                "%(id)s.%(ext)s"
+            ),
+
+            args.url
+        ),
+        root
+    )
+
+
+    subtitle_files = list(
+        (job / "subtitles").glob("*.vtt")
+    )
+
+
+    print(
+        "Subtitle files:",
+        subtitle_files,
+        flush=True
+    )
+
+
+
+    # -------------------------
+    # 3. 截取截图
+    # -------------------------
+
+    print("\nSTEP 3: Generate screenshots", flush=True)
+
+
+    videos = list(
+        (job / "source").glob("*.mp4")
+    )
+
+
     if not videos:
-        raise RuntimeError("No MP4 video found")
+        raise RuntimeError(
+            "No video file found"
+        )
+
+
     video = videos[0]
 
-    run([
-        py, str(root / "scripts" / "sample_frames.py"),
-        str(video), str(job / "frames"), "--count", "48"
-    ], root)
 
-    run([
-        py, str(root / "scripts" / "analyze_candidates.py"),
-        str(video), str(job / "subtitles"),
-        "--images", str(a.images), "--mode", a.mode,
-        "--out", str(job / "candidates" / "manifest.json")
-    ], root)
+    run(
+        [
+            py,
 
-    run([
-        py, str(root / "scripts" / "render_3x4.py"),
-        str(video), str(job / "candidates" / "manifest.json"),
-        "--out", str(job / "final"), "--width", "1440"
-    ], root)
+            str(
+                root /
+                "scripts" /
+                "sample_frames.py"
+            ),
 
-    run([
-        py, str(root / "scripts" / "qa.py"),
-        "--output", str(job / "final")
-    ], root)
+            str(video),
+
+            str(
+                job /
+                "frames"
+            ),
+
+            "--count",
+
+            str(args.images)
+        ],
+
+        root
+    )
+
+
+    print(
+        "Screenshots generated",
+        flush=True
+    )
+
+
+
+    # -------------------------
+    # 4. 删除视频
+    # -------------------------
+
+    print("\nSTEP 4: Delete temporary video", flush=True)
+
+
+    if video.exists():
+
+        video.unlink()
+
+        print(
+            "Deleted:",
+            video,
+            flush=True
+        )
+
+
+
+    print("\n===================")
+    print("DONE")
+    print("Frames:", job / "frames")
+    print("Subtitles:", job / "subtitles")
+    print("===================")
+
+
 
 if __name__ == "__main__":
     main()
