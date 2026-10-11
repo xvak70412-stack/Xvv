@@ -23,11 +23,12 @@ jobs:
           fetch-depth: 0
 
       - name: Debug repository version
+        shell: powershell
         run: |
-          git rev-parse HEAD
-          git log -1 --oneline
-          Write-Host "Current github_job_windows.py:"
-          Get-Content vlog-video-harness-chatgpt-bridge/vlog-video-harness/scripts/github_job_windows.py -TotalCount 5
+               Write-Host "Current repository:"
+               Get-Location
+               Write-Host "Current github_job_windows.py:"
+    Get-Content vlog-video-harness-chatgpt-bridge/vlog-video-harness/scripts/github_job_windows.py -TotalCount 10
 
       - name: Install Python dependencies
         run: |
