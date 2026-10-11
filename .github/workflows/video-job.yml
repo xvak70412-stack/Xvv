@@ -13,7 +13,6 @@ jobs:
     if: contains(github.event.issue.labels.*.name, 'video-job')
     runs-on: [self-hosted, Windows, X64]
     timeout-minutes: 180
-    timeout-minutes: 180
 
     defaults:
       run:
@@ -26,12 +25,10 @@ jobs:
           fetch-depth: 0
 
       - name: Debug repository version
-        shell: powershell
         run: |
-               Write-Host "Current repository:"
-               Get-Location
-               Write-Host "Current github_job_windows.py:"
-       Get-Content vlog-video-harness-chatgpt-bridge/vlog-video-harness/scripts/github_job_windows.py -TotalCount 10
+          git rev-parse HEAD
+          git log -1 --oneline
+          Get-ChildItem -Recurse -Filter github_job_windows.py
 
       - name: Install Python dependencies
         run: |
@@ -42,7 +39,7 @@ jobs:
       - name: Verify Python dependencies
         run: |
           $env:Path = "C:\Users\32766\.deno\bin;$env:Path"
-          & 'C:\Program Files\Python314\python.exe' -c "import yt_dlp, PIL; print('Dependencies OK'); print(yt_dlp.__file__)"
+          & 'C:\Program Files\Python314\python.exe' -c "import yt_dlp, PIL; print('Dependencies OK')"
           & 'C:\Program Files\Python314\python.exe' -m yt_dlp --version
           deno --version
 
@@ -51,9 +48,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_EVENT_PATH: ${{ github.event_path }}
-          GITHUB_RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          $env:Path = "C:\Users\32766\.deno\bin;$env:Path"
           & 'C:\Program Files\Python314\python.exe' vlog-video-harness-chatgpt-bridge/vlog-video-harness/scripts/github_job_windows.py
 
       - name: Upload video outputs
@@ -62,9 +57,6 @@ jobs:
         with:
           name: video-job-${{ github.event.issue.number }}
           path: |
-            vlog-video-harness-chatgpt-bridge/vlog-video-harness/output/github-job-${{ github.event.issue.number }}/final
-            vlog-video-harness-chatgpt-bridge/vlog-video-harness/output/github-job-${{ github.event.issue.number }}/subtitles/*.vtt
-            vlog-video-harness-chatgpt-bridge/vlog-video-harness/output/github-job-${{ github.event.issue.number }}/subtitles/subtitle-summary.json
-            vlog-video-harness-chatgpt-bridge/vlog-video-harness/output/github-job-${{ github.event.issue.number }}/source/metadata.json
+            vlog-video-harness-chatgpt-bridge/vlog-video-harness/output
           if-no-files-found: warn
           retention-days: 7
