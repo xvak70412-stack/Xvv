@@ -93,22 +93,33 @@ with tempfile.TemporaryDirectory() as td:
             im.convert("RGB").save(target, quality=95)
         rendered.append(target)
 
-# A clean 3-column x 2-row contact sheet. Each image is contained (not cropped)
-# within its cell, with a white background and a filename label.
+# Keep the existing 3-column x 2-row contact-sheet layout, but create
+# multiple sheets when there are more than five candidate images.
 cell_w = max(360, a.width // 3)
 cell_h = round(cell_w * 3 / 4)
 label_h = 28
-sheet = Image.new("RGB", (cell_w * 3, (cell_h + label_h) * 2), "white")
-draw = ImageDraw.Draw(sheet)
 font = ImageFont.load_default()
-for i, path in enumerate(rendered[:5]):
-    col, row = i % 3, i // 3
-    x, y = col * cell_w, row * (cell_h + label_h)
-    with Image.open(path) as im:
-        im = ImageOps.contain(im.convert("RGB"), (cell_w, cell_h))
-        px = x + (cell_w - im.width) // 2
-        py = y + (cell_h - im.height) // 2
-        sheet.paste(im, (px, py))
-    draw.text((x + 8, y + cell_h + 6), path.name, fill="black", font=font)
-sheet.save(out / "contact_sheet.jpg", quality=92)
+batch_size = 5
+
+for batch_start in range(0, len(rendered), batch_size):
+    batch = rendered[batch_start:batch_start + batch_size]
+    sheet = Image.new("RGB", (cell_w * 3, (cell_h + label_h) * 2), "white")
+    draw = ImageDraw.Draw(sheet)
+    for i, path in enumerate(batch):
+        col, row = i % 3, i // 3
+        x, y = col * cell_w, row * (cell_h + label_h)
+        with Image.open(path) as im:
+            im = ImageOps.contain(im.convert("RGB"), (cell_w, cell_h))
+            px = x + (cell_w - im.width) // 2
+            py = y + (cell_h - im.height) // 2
+            sheet.paste(im, (px, py))
+        draw.text((x + 8, y + cell_h + 6), path.name, fill="black", font=font)
+    sheet_number = batch_start // batch_size + 1
+    sheet.save(out / f"contact_sheet_{sheet_number:02d}.jpg", quality=92)
+
+# Keep the familiar filename for the first sheet for existing workflows.
+if rendered:
+    first_sheet = out / "contact_sheet_01.jpg"
+    if first_sheet.exists():
+        shutil.copy2(first_sheet, out / "contact_sheet.jpg")
 print("render complete")
