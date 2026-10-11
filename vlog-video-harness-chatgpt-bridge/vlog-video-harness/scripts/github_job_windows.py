@@ -20,7 +20,7 @@ def parse_body(body):
     mm = re.search(r"(?im)^\s*mode\s*:\s*(auto|native|script)\s*$", body or "")
     mode = mm.group(1) if mm else "auto"
     im = re.search(r"(?im)^\s*images\s*:\s*(\d+)\s*$", body or "")
-    images = max(1, min(15, int(im.group(1)))) if im else 5
+    images = max(1, min(15, int(im.group(1)))) if im else 15
     return url, mode, images
 
 def github_api(path, method="GET", payload=None):
