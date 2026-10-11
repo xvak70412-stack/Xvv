@@ -100,6 +100,8 @@ def main():
         if p.returncode:
             raise SystemExit(p.returncode)
     except Exception as exc:
+        print("ERROR:", repr(exc))
+        
         (out / "job-result.json").write_text(
             json.dumps({"status": "failed", "job": number, "error": repr(exc)},
                        ensure_ascii=False, indent=2),
