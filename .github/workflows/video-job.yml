@@ -28,7 +28,7 @@ jobs:
                Write-Host "Current repository:"
                Get-Location
                Write-Host "Current github_job_windows.py:"
-    Get-Content vlog-video-harness-chatgpt-bridge/vlog-video-harness/scripts/github_job_windows.py -TotalCount 10
+       Get-Content vlog-video-harness-chatgpt-bridge/vlog-video-harness/scripts/github_job_windows.py -TotalCount 10
 
       - name: Install Python dependencies
         run: |
