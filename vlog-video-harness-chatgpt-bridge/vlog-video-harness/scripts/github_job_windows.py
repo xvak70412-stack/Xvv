@@ -1,62 +1,161 @@
-import json
 import os
-import re
+import json
 import subprocess
-import sys
-import urllib.request
+import shutil
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-OUT_ROOT = ROOT / "output"
+
+ROOT = Path(__file__).resolve().parent.parent
+OUTPUT_DIR = ROOT / "outputs"
+
+VIDEO_DIR = OUTPUT_DIR / "video"
+IMAGE_DIR = OUTPUT_DIR / "screenshots"
+SUBTITLE_DIR = OUTPUT_DIR / "subtitles"
 
 
-def parse_body(body):
-    m = re.search(r"(?im)^\s*url\s*:\s*(\S+)\s*$", body or "")
-    if not m:
-        raise ValueError("Issue body must contain URL: <youtube-url>")
-    url = m.group(1)
-    mode = re.search(r"(?im)^\s*mode\s*:\s*(auto|native|script)\s*$", body or "")
-    images = re.search(r"(?im)^\s*images\s*:\s*(\d+)\s*$", body or "")
-    return url, mode.group(1) if mode else "auto", min(15, max(1, int(images.group(1)))) if images else 15
+def run(cmd):
+    print("\n>>>", " ".join(cmd))
+    subprocess.run(cmd, check=True)
 
 
-def github_api(path):
-    req = urllib.request.Request(
-        "https://api.github.com" + path,
-        headers={
-            "Authorization": "Bearer " + os.environ["GITHUB_TOKEN"],
-            "Accept": "application/vnd.github+json",
-            "User-Agent": "Xvv-video-harness",
-        },
+def clean_dir(path):
+    if path.exists():
+        shutil.rmtree(path)
+
+    path.mkdir(parents=True, exist_ok=True)
+
+
+def download_video(url):
+    VIDEO_DIR.mkdir(parents=True, exist_ok=True)
+
+    output = VIDEO_DIR / "source.%(ext)s"
+
+    run([
+        "yt-dlp",
+        "-f",
+        "bestvideo+bestaudio/best",
+        "-o",
+        str(output),
+        url
+    ])
+
+
+def download_subtitle(url):
+    SUBTITLE_DIR.mkdir(parents=True, exist_ok=True)
+
+    output = SUBTITLE_DIR / "subtitle"
+
+    run([
+        "yt-dlp",
+        "--write-auto-subs",
+        "--write-subs",
+        "--sub-lang",
+        "zh,en",
+        "--skip-download",
+        "-o",
+        str(output),
+        url
+    ])
+
+
+def find_video():
+
+    for f in VIDEO_DIR.iterdir():
+
+        if f.suffix.lower() in [
+            ".mp4",
+            ".mkv",
+            ".webm"
+        ]:
+            return f
+
+    return None
+
+
+
+def extract_screenshots(video):
+
+    IMAGE_DIR.mkdir(
+        parents=True,
+        exist_ok=True
     )
-    with urllib.request.urlopen(req, timeout=30) as r:
-        return json.loads(r.read().decode())
+
+    # 15张截图
+    for i in range(15):
+
+        timestamp = i * 60
+
+        output = IMAGE_DIR / f"{i+1:02d}.jpg"
+
+        run([
+            "ffmpeg",
+            "-ss",
+            str(timestamp),
+            "-i",
+            str(video),
+            "-frames:v",
+            "1",
+            "-q:v",
+            "2",
+            str(output)
+        ])
+
+
+def delete_video():
+
+    if VIDEO_DIR.exists():
+
+        for f in VIDEO_DIR.iterdir():
+
+            if f.is_file():
+                f.unlink()
+
+        print("video deleted")
 
 
 def main():
-    print("START github_job_windows")
-    event_path = os.environ.get("GITHUB_EVENT_PATH")
-    event = json.loads(Path(event_path).read_text(encoding="utf-8"))
-    print("EVENT KEYS:", list(event.keys()))
 
-    repo = os.environ["GITHUB_REPOSITORY"]
-    number = int(event.get("issue", {}).get("number", 0))
-    if not number:
-        raise ValueError("No issue number found in GitHub event")
+    url = os.environ.get(
+        "VIDEO_URL"
+    )
 
-    issue = github_api(f"/repos/{repo}/issues/{number}")
-    url, mode, images = parse_body(issue.get("body", ""))
+    if not url:
+        raise Exception(
+            "missing VIDEO_URL"
+        )
 
-    out = OUT_ROOT / f"github-job-{number}"
-    out.mkdir(parents=True, exist_ok=True)
 
-    cmd = [sys.executable, str(ROOT / "scripts" / "run-vlog-windows.py"), url, str(images), mode, "--out", str(out)]
-    print("RUN:", cmd)
-    p = subprocess.run(cmd, cwd=ROOT, text=True, capture_output=True)
-    print(p.stdout)
-    print(p.stderr)
-    if p.returncode:
-        raise SystemExit(p.returncode)
+    clean_dir(OUTPUT_DIR)
+
+    print("download video")
+
+    download_video(url)
+
+
+    print("download subtitles")
+
+    download_subtitle(url)
+
+
+    video=find_video()
+
+    if not video:
+        raise Exception(
+            "video not found"
+        )
+
+
+    print("extract screenshots")
+
+    extract_screenshots(video)
+
+
+    print("remove video")
+
+    delete_video()
+
+
+    print("DONE")
 
 
 if __name__ == "__main__":
