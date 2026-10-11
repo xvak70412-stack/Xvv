@@ -8,7 +8,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-OUTPUT_DIR = ROOT / "outputs"
+OUTPUT_DIR = ROOT / "output"
 
 VIDEO_DIR = OUTPUT_DIR / "video"
 IMAGE_DIR = OUTPUT_DIR / "screenshots"
