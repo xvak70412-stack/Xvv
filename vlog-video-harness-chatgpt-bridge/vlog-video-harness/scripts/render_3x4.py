@@ -5,7 +5,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from PIL import Image, ImageOps, ImageDraw, ImageFont
+from PIL import Image, ImageOps
 
 p = argparse.ArgumentParser()
 p.add_argument("video")
@@ -33,16 +33,8 @@ def has_bottom_text(image_path):
     try:
         with Image.open(image_path) as im:
             im = im.convert("RGB")
-            # Subtitle text usually sits in the lower quarter. Ignore most of
-            # the scene and OCR only this band to reduce unrelated detections.
             band = im.crop((0, int(im.height * 0.72), im.width, im.height))
             band = ImageOps.grayscale(band)
-            result = subprocess.run(
-                [exe, "stdin", "stdout", "--psm", "6"],
-                input=b"", stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                check=False,
-            ) if False else None
-            # Tesseract accepts an image filename; use a temporary PNG.
             with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
                 temp_path = Path(tmp.name)
             try:
@@ -63,8 +55,8 @@ def safe_name(value, fallback):
     name = "".join(ch if ch.isalnum() or ch in "-_." else "-" for ch in str(value))
     return name.strip("-.") or fallback
 
-# Render one full frame per candidate. Do not create nested strips from the
-# same frame, which caused the previous collage to look duplicated/cropped.
+# Export each candidate as an individual, full-frame image.
+# Do not add subtitles, dialogue panels, labels, or contact sheets.
 rendered = []
 with tempfile.TemporaryDirectory() as td:
     td = Path(td)
@@ -73,8 +65,8 @@ with tempfile.TemporaryDirectory() as td:
         if not times:
             continue
 
-        # Try the available candidate timestamps in order and prefer one
-        # without OCR-detected text in the bottom subtitle band.
+        # If Tesseract happens to be installed, prefer a frame whose lower
+        # band has no detected text. Otherwise use the first candidate time.
         chosen = None
         for i, timestamp in enumerate(times):
             frame = td / f"candidate-{n:02d}-{i:02d}.jpg"
@@ -83,7 +75,7 @@ with tempfile.TemporaryDirectory() as td:
                 chosen = frame
                 break
             if chosen is None:
-                chosen = frame  # fallback if every timestamp contains text
+                chosen = frame
 
         if chosen is None:
             continue
@@ -93,33 +85,4 @@ with tempfile.TemporaryDirectory() as td:
             im.convert("RGB").save(target, quality=95)
         rendered.append(target)
 
-# Keep the existing 3-column x 2-row contact-sheet layout, but create
-# multiple sheets when there are more than five candidate images.
-cell_w = max(360, a.width // 3)
-cell_h = round(cell_w * 3 / 4)
-label_h = 28
-font = ImageFont.load_default()
-batch_size = 5
-
-for batch_start in range(0, len(rendered), batch_size):
-    batch = rendered[batch_start:batch_start + batch_size]
-    sheet = Image.new("RGB", (cell_w * 3, (cell_h + label_h) * 2), "white")
-    draw = ImageDraw.Draw(sheet)
-    for i, path in enumerate(batch):
-        col, row = i % 3, i // 3
-        x, y = col * cell_w, row * (cell_h + label_h)
-        with Image.open(path) as im:
-            im = ImageOps.contain(im.convert("RGB"), (cell_w, cell_h))
-            px = x + (cell_w - im.width) // 2
-            py = y + (cell_h - im.height) // 2
-            sheet.paste(im, (px, py))
-        draw.text((x + 8, y + cell_h + 6), path.name, fill="black", font=font)
-    sheet_number = batch_start // batch_size + 1
-    sheet.save(out / f"contact_sheet_{sheet_number:02d}.jpg", quality=92)
-
-# Keep the familiar filename for the first sheet for existing workflows.
-if rendered:
-    first_sheet = out / "contact_sheet_01.jpg"
-    if first_sheet.exists():
-        shutil.copy2(first_sheet, out / "contact_sheet.jpg")
-print("render complete")
+print(f"render complete: {len(rendered)} individual candidate images")
