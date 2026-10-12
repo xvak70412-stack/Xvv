@@ -121,7 +121,7 @@ def get_remote_video(url):
         "proxy": get_network_proxy(),
         "writesubtitles": True,
         "writeautomaticsub": True,
-        "subtitleslangs": ["zh-Hans", "zh", "en"],
+        "subtitleslangs": ["en-orig"],
         "subtitlesformat": "vtt",
         "skip_download": True,
         "outtmpl": str(SUBTITLE_DIR / "subtitle.%(ext)s"),
@@ -154,23 +154,117 @@ def get_remote_video(url):
                 "proxy": options["proxy"], "info": info, "options": options}
 
 
-def download_subtitle(remote):
+def select_original_subtitles(info):
+    native = info.get("subtitles") or {}
+    automatic = info.get("automatic_captions") or {}
+    originals = [key for key in automatic if key.endswith("-orig")]
+    declared = info.get("language") or ""
+    originals.sort(key=lambda key: (key != declared + "-orig", key != "en-orig", key))
+    source = declared or (originals[0][:-5] if originals else "")
+    # Exactly one source-language track. Never request auto-translated tracks.
+    native_keys = [
+        key for key in native if key != "live_chat" and source and (
+            key == source or key.split("-")[0] == source.split("-")[0]
+        )
+    ]
+    native_keys.sort(key=lambda key: (key != source, key))
+    if native_keys:
+        key = native_keys[0]
+        tracks = native[key]
+    elif originals:
+        key = originals[0]
+        tracks = automatic[key]
+    elif source and source in automatic:
+        key = source
+        tracks = automatic[key]
+    elif not source and len(native) == 1 and "live_chat" not in native:
+        key, tracks = next(iter(native.items()))
+    else:
+        return {}
+    vtt = next((track for track in reversed(tracks)
+                if track.get("ext") == "vtt" and track.get("url")), None)
+    return {key: dict(vtt)} if vtt else {}
+
+
+def valid_subtitle_files():
+    return [
+        path for path in SUBTITLE_DIR.glob("*.vtt")
+        if path.is_file() and path.stat().st_size > 0
+        and path.read_text(encoding="utf-8-sig", errors="replace").lstrip().startswith("WEBVTT")
+        and "-->" in path.read_text(encoding="utf-8-sig", errors="replace")
+    ]
+
+
+def retry_delay(error):
+    # Honour Retry-After where the underlying HTTP exception exposes it.
+    current = error
+    seen = set()
+    for _ in range(8):
+        if current is None or id(current) in seen:
+            break
+        seen.add(id(current))
+        headers = getattr(current, "headers", None)
+        value = headers.get("Retry-After") if headers else None
+        if value:
+            try:
+                return max(60, int(value))
+            except (ValueError, TypeError):
+                from email.utils import parsedate_to_datetime
+                try:
+                    return max(60, int(parsedate_to_datetime(value).timestamp() - time.time()))
+                except (ValueError, TypeError, OverflowError):
+                    pass
+        nested = getattr(current, "exc_info", None)
+        current = (nested[1] if isinstance(nested, tuple) and len(nested) > 1
+                   else getattr(current, "cause", None) or getattr(current, "__cause__", None))
+    return 60
+
+
+def download_subtitle(remote, languages=None):
     SUBTITLE_DIR.mkdir(parents=True, exist_ok=True)
-    subtitles = remote["info"].get("requested_subtitles") or {}
+    subtitles = select_original_subtitles(remote["info"])
+    if languages is not None:
+        subtitles = {key: value for key, value in subtitles.items() if key in languages}
     if not subtitles:
-        print("No requested subtitles available", flush=True)
-        return
-    # Reuse the existing metadata; do not request the YouTube page a second time.
+        print("No supported original-language VTT subtitles available", flush=True)
+        return {}
+    pending = {}
+    # Reuse existing metadata; skip_download prevents a full video download.
     with yt_dlp.YoutubeDL(remote["options"]) as ydl:
         for language, subtitle in subtitles.items():
             info = dict(remote["info"])
             info["requested_subtitles"] = {language: dict(subtitle)}
             try:
                 ydl.process_info(info)
-                print(f"SUBTITLE {language} SAVED", flush=True)
+                target = SUBTITLE_DIR / f"subtitle.{language}.vtt"
+                if target not in valid_subtitle_files():
+                    raise RuntimeError("Subtitle file missing, empty or invalid")
+                print(f"SUBTITLE {language} VERIFIED", flush=True)
             except Exception as error:
-                print(f"SUBTITLE {language} FAILED: {type(error).__name__}; "
-                      "other subtitles and screenshots will be retained", flush=True)
+                limited = "429" in str(error)
+                delay = retry_delay(error) if limited else 30
+                pending[language] = time.monotonic() + delay
+                reason = "HTTP 429 rate limit" if limited else type(error).__name__
+                print(f"SUBTITLE {language} FAILED: {reason}; retry after {delay}s",
+                      flush=True)
+    return pending
+
+
+def retry_subtitles(remote, pending):
+    if not pending:
+        return
+    for language, ready_at in pending.items():
+        remaining = ready_at - time.monotonic()
+        if remaining > 300:
+            print(f"Subtitle server requested a long cooldown for {language}; "
+                  "stop instead of retrying before Retry-After", flush=True)
+            continue
+        while remaining > 0:
+            print(f"SUBTITLE {language}: waiting {math.ceil(remaining)}s before retry",
+                  flush=True)
+            time.sleep(min(remaining, 15))
+            remaining = ready_at - time.monotonic()
+        download_subtitle(remote, [language])
 
 
 def ffmpeg_error(stderr, remote):
@@ -189,10 +283,10 @@ def render_screenshot(output):
         raise RuntimeError(f"Screenshot missing: {output.name}")
     with Image.open(output) as frame:
         frame = ImageOps.exif_transpose(frame).convert("RGB")
-        canvas = Image.new("RGB", (1440, 1920), "white")
-        frame.thumbnail((1440, 1440), Image.Resampling.LANCZOS)
-        canvas.paste(frame, ((1440 - frame.width) // 2, 0))
-        canvas.save(output, quality=95)
+        # Fill a 4:3 landscape image with a centre crop; no padding or stretching.
+        frame = ImageOps.fit(frame, (1440, 1080), Image.Resampling.LANCZOS,
+                             centering=(0.5, 0.5))
+        frame.save(output, quality=95)
 
 
 def extract_one_screenshot(remote, index, timestamp):
@@ -331,9 +425,17 @@ def main():
         print("STEP 1 READ VIDEO INFO (NO FULL DOWNLOAD)", flush=True)
         remote = get_remote_video(url)
         print("STEP 2 DOWNLOAD SUBTITLE", flush=True)
-        download_subtitle(remote)
+        pending_subtitles = download_subtitle(remote)
         print("STEP 3 CAPTURE 15 REMOTE FRAMES", flush=True)
-        extract_screenshots(url, remote)
+        try:
+            extract_screenshots(url, remote)
+        finally:
+            retry_subtitles(remote, pending_subtitles)
+        if not valid_subtitle_files():
+            raise RuntimeError(
+                "Screenshots saved, but no valid original subtitle file was downloaded. "
+                "The job is incomplete; check subtitle availability or rate-limit errors."
+            )
     finally:
         delete_video()
 
