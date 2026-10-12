@@ -33,14 +33,29 @@ jobs:
         run: |
           python -c "import yt_dlp, PIL; print('Dependencies OK')"
           python -m yt_dlp --version
+          ffmpeg -version
+          if ($LASTEXITCODE -ne 0) { throw "ffmpeg unavailable" }
+          ffprobe -version
+          if ($LASTEXITCODE -ne 0) { throw "ffprobe unavailable" }
 
       - name: Run video job
         env:
+          PYTHONUNBUFFERED: "1"
+          PYTHONUTF8: "1"
+          YOUTUBE_COOKIES_PATH: C:\actions-runner\secrets\cookies.txt
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_EVENT_PATH: ${{ github.event_path }}
         run: |
           python vlog-video-harness-chatgpt-bridge/vlog-video-harness/scripts/github_job_windows.py
+
+      - name: Clean temporary video
+        if: always()
+        run: |
+          $videoDir = "vlog-video-harness-chatgpt-bridge/vlog-video-harness/output/video"
+          if (Test-Path $videoDir) {
+            Remove-Item -LiteralPath $videoDir -Recurse -Force -ErrorAction Stop
+          }
 
       - name: Upload video outputs
         if: always()
@@ -48,6 +63,7 @@ jobs:
         with:
           name: video-job-${{ github.event.issue.number }}
           path: |
-            vlog-video-harness-chatgpt-bridge/vlog-video-harness/output
+            vlog-video-harness-chatgpt-bridge/vlog-video-harness/output/screenshots/*.jpg
+            vlog-video-harness-chatgpt-bridge/vlog-video-harness/output/subtitles/*.vtt
           if-no-files-found: warn
           retention-days: 7
