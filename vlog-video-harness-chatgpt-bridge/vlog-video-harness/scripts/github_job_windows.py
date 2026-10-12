@@ -4,6 +4,8 @@ import subprocess
 import shutil
 import re
 import sys
+import time
+from concurrent.futures import ThreadPoolExecutor
 from PIL import Image, ImageOps
 from pathlib import Path
 
@@ -107,6 +109,7 @@ def download_video(url):
     # Screenshots need video only: do not request the audio that failed with 403.
     output = VIDEO_DIR / "source.%(ext)s"
     run(ytdlp_command() + [
+        "--concurrent-fragments", "4",
         "-f", "bestvideo[height<=1080]/best[height<=1080]",
         "-o", str(output), url
     ])
@@ -197,75 +200,40 @@ def get_duration(video):
 
 
 
+def extract_one_screenshot(video, index, timestamp):
+    output = IMAGE_DIR / f"{index + 1:02d}.jpg"
+    run([
+        "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+        "-ss", str(timestamp), "-threads", "2", "-i", str(video),
+        "-frames:v", "1", "-q:v", "2", "-threads", "1", str(output)
+    ])
+    if not output.is_file() or output.stat().st_size == 0:
+        raise RuntimeError(f"Screenshot missing: {output}")
+    with Image.open(output) as frame:
+        frame = ImageOps.exif_transpose(frame).convert("RGB")
+        canvas = Image.new("RGB", (1440, 1920), "white")
+        frame.thumbnail((1440, 1440), Image.Resampling.LANCZOS)
+        canvas.paste(frame, ((1440 - frame.width) // 2, 0))
+        canvas.save(output, quality=95)
+    print(f"SCREENSHOT {index + 1}/15 SAVED", flush=True)
+
+
 def extract_screenshots(video):
-
-    IMAGE_DIR.mkdir(
-        parents=True,
-        exist_ok=True
-    )
-
-
+    IMAGE_DIR.mkdir(parents=True, exist_ok=True)
     duration = get_duration(video)
-
-
-    print(
-        "VIDEO LENGTH:",
-        duration,
-        "seconds",
-        flush=True
-    )
-
-
-    # 平均取15个时间点
-
-    points = []
-
-
-    for i in range(15):
-
-        t = duration / 16 * (i + 1)
-
-        points.append(t)
-
-
-
-    for index, timestamp in enumerate(points):
-
-        output = IMAGE_DIR / f"{index+1:02d}.jpg"
-
-
-        run([
-
-            "ffmpeg",
-
-            "-y",
-            "-ss",
-            str(timestamp),
-
-            "-i",
-            str(video),
-
-            "-frames:v",
-            "1",
-
-            "-q:v",
-            "2",
-
-            str(output)
-
-        ])
-
-        if not output.is_file() or output.stat().st_size == 0:
-            raise RuntimeError(f"Screenshot missing: {output}")
-        # One 3:4 image per frame, with a blank white area underneath.
-        with Image.open(output) as frame:
-            frame = ImageOps.exif_transpose(frame).convert("RGB")
-            canvas = Image.new("RGB", (1440, 1920), "white")
-            frame.thumbnail((1440, 1440), Image.Resampling.LANCZOS)
-            canvas.paste(frame, ((1440 - frame.width) // 2, 0))
-            canvas.save(output, quality=95)
-        print(f"SCREENSHOT {index + 1}/15 SAVED", flush=True)
-
+    workers = min(3, max(1, (os.cpu_count() or 2) // 2))
+    print(f"VIDEO LENGTH: {duration} seconds; screenshot workers: {workers}", flush=True)
+    started = time.perf_counter()
+    # Independent files preserve numbering and the original 15 timestamps.
+    # The context waits for all workers, including on errors, before video cleanup.
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = [
+            pool.submit(extract_one_screenshot, video, index, duration / 16 * (index + 1))
+            for index in range(15)
+        ]
+        for future in futures:
+            future.result()
+    print(f"SCREENSHOTS FINISHED IN {time.perf_counter() - started:.1f}s", flush=True)
 
 
 def delete_video():
@@ -315,7 +283,9 @@ def main():
 
     try:
         print("STEP 1 DOWNLOAD VIDEO", flush=True)
+        started = time.perf_counter()
         download_video(url)
+        print(f"VIDEO DOWNLOAD FINISHED IN {time.perf_counter() - started:.1f}s", flush=True)
         print("STEP 2 DOWNLOAD SUBTITLE", flush=True)
         download_subtitle(url)
         video = find_video()
