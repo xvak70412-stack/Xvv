@@ -16,8 +16,13 @@ SUBTITLE_DIR = OUTPUT_DIR / "subtitles"
 
 
 def run(cmd):
+
     print("\n>>>", " ".join(cmd), flush=True)
-    subprocess.run(cmd, check=True)
+
+    subprocess.run(
+        cmd,
+        check=True
+    )
 
 
 def clean_dir(path):
@@ -48,6 +53,7 @@ def get_video_url():
         "r",
         encoding="utf-8"
     ) as f:
+
         event = json.load(f)
 
 
@@ -62,17 +68,19 @@ def get_video_url():
 
     if not urls:
         raise Exception(
-            "No YouTube URL found in issue"
+            "No YouTube URL found"
         )
 
 
     url = urls[0].rstrip(")")
+
 
     print(
         "VIDEO URL:",
         url,
         flush=True
     )
+
 
     return url
 
@@ -117,26 +125,36 @@ def download_subtitle(url):
     output = SUBTITLE_DIR / "subtitle"
 
 
-    run([
-        "yt-dlp",
+    try:
 
-        "--write-auto-subs",
+        run([
+            "yt-dlp",
 
-        "--write-subs",
+            "--write-auto-subs",
 
-        "--sub-lang",
-        "zh,en",
+            "--write-subs",
 
-        "--sub-format",
-        "vtt",
+            "--sub-lang",
+            "zh-Hans,zh,en",
 
-        "--skip-download",
+            "--sub-format",
+            "vtt",
 
-        "-o",
-        str(output),
+            "--skip-download",
 
-        url
-    ])
+            "-o",
+            str(output),
+
+            url
+        ])
+
+
+    except Exception:
+
+        print(
+            "Subtitle download failed, continue",
+            flush=True
+        )
 
 
 
@@ -151,7 +169,34 @@ def find_video():
         ]:
             return f
 
+
     return None
+
+
+
+def get_duration(video):
+
+    result = subprocess.check_output(
+        [
+            "ffprobe",
+
+            "-v",
+            "error",
+
+            "-show_entries",
+            "format=duration",
+
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+
+            str(video)
+        ],
+
+        text=True
+    )
+
+
+    return float(result.strip())
 
 
 
@@ -163,14 +208,37 @@ def extract_screenshots(video):
     )
 
 
+    duration = get_duration(video)
+
+
+    print(
+        "VIDEO LENGTH:",
+        duration,
+        "seconds",
+        flush=True
+    )
+
+
+    # 平均取15个时间点
+
+    points = []
+
+
     for i in range(15):
 
-        timestamp = i * 60
+        t = duration / 16 * (i + 1)
 
-        output = IMAGE_DIR / f"{i+1:02d}.jpg"
+        points.append(t)
+
+
+
+    for index, timestamp in enumerate(points):
+
+        output = IMAGE_DIR / f"{index+1:02d}.jpg"
 
 
         run([
+
             "ffmpeg",
 
             "-ss",
@@ -186,6 +254,7 @@ def extract_screenshots(video):
             "2",
 
             str(output)
+
         ])
 
 
@@ -202,9 +271,26 @@ def delete_video():
 
 
     print(
-        "video deleted",
+        "VIDEO DELETED",
         flush=True
     )
+
+
+
+def show_output():
+
+    print(
+        "\nOUTPUT FILES:",
+        flush=True
+    )
+
+
+    for f in OUTPUT_DIR.rglob("*"):
+
+        print(
+            f,
+            flush=True
+        )
 
 
 
@@ -219,7 +305,7 @@ def main():
 
 
     print(
-        "STEP 1: download video",
+        "STEP 1 DOWNLOAD VIDEO",
         flush=True
     )
 
@@ -228,7 +314,7 @@ def main():
 
 
     print(
-        "STEP 2: download subtitles",
+        "STEP 2 DOWNLOAD SUBTITLE",
         flush=True
     )
 
@@ -248,7 +334,7 @@ def main():
 
 
     print(
-        "STEP 3: screenshots",
+        "STEP 3 SCREENSHOTS",
         flush=True
     )
 
@@ -257,7 +343,7 @@ def main():
 
 
     print(
-        "STEP 4: delete video",
+        "STEP 4 DELETE VIDEO",
         flush=True
     )
 
@@ -265,11 +351,16 @@ def main():
 
 
 
+    show_output()
+
+
     print(
-        "DONE",
+        "\nDONE",
         flush=True
     )
 
 
+
 if __name__ == "__main__":
+
     main()
