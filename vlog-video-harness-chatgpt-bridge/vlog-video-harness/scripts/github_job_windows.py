@@ -3,6 +3,8 @@ import json
 import subprocess
 import shutil
 import re
+import sys
+from PIL import Image, ImageOps
 from pathlib import Path
 
 
@@ -86,32 +88,28 @@ def get_video_url():
 
 
 
+def ytdlp_command():
+    cmd = [sys.executable, "-m", "yt_dlp", "--newline",
+           "--progress-delta", "5", "--socket-timeout", "30",
+           "--retries", "3", "--fragment-retries", "3"]
+    cookies = Path(os.environ.get("YOUTUBE_COOKIES_PATH",
+                                 r"C:\actions-runner\secrets\cookies.txt"))
+    if cookies.is_file():
+        cmd += ["--cookies", str(cookies)]
+        print("Using configured cookies file", flush=True)
+    else:
+        print("Cookies file not found; trying public access", flush=True)
+    return cmd
+
+
 def download_video(url):
-
-    VIDEO_DIR.mkdir(
-        parents=True,
-        exist_ok=True
-    )
-
-
+    VIDEO_DIR.mkdir(parents=True, exist_ok=True)
+    # Screenshots need video only: do not request the audio that failed with 403.
     output = VIDEO_DIR / "source.%(ext)s"
-
-
-    run([
-        "yt-dlp",
-
-        "-f",
-        "bestvideo[height<=1080]+bestaudio/best",
-
-        "--merge-output-format",
-        "mp4",
-
-        "-o",
-        str(output),
-
-        url
+    run(ytdlp_command() + [
+        "-f", "bestvideo[height<=1080]/best[height<=1080]",
+        "-o", str(output), url
     ])
-
 
 
 def download_subtitle(url):
@@ -127,8 +125,7 @@ def download_subtitle(url):
 
     try:
 
-        run([
-            "yt-dlp",
+        run(ytdlp_command() + [
 
             "--write-auto-subs",
 
@@ -241,6 +238,7 @@ def extract_screenshots(video):
 
             "ffmpeg",
 
+            "-y",
             "-ss",
             str(timestamp),
 
@@ -256,6 +254,17 @@ def extract_screenshots(video):
             str(output)
 
         ])
+
+        if not output.is_file() or output.stat().st_size == 0:
+            raise RuntimeError(f"Screenshot missing: {output}")
+        # One 3:4 image per frame, with a blank white area underneath.
+        with Image.open(output) as frame:
+            frame = ImageOps.exif_transpose(frame).convert("RGB")
+            canvas = Image.new("RGB", (1440, 1920), "white")
+            frame.thumbnail((1440, 1440), Image.Resampling.LANCZOS)
+            canvas.paste(frame, ((1440 - frame.width) // 2, 0))
+            canvas.save(output, quality=95)
+        print(f"SCREENSHOT {index + 1}/15 SAVED", flush=True)
 
 
 
@@ -304,52 +313,19 @@ def main():
     )
 
 
-    print(
-        "STEP 1 DOWNLOAD VIDEO",
-        flush=True
-    )
-
-    download_video(url)
-
-
-
-    print(
-        "STEP 2 DOWNLOAD SUBTITLE",
-        flush=True
-    )
-
-    download_subtitle(url)
-
-
-
-    video = find_video()
-
-
-    if not video:
-
-        raise Exception(
-            "video not found"
-        )
-
-
-
-    print(
-        "STEP 3 SCREENSHOTS",
-        flush=True
-    )
-
-    extract_screenshots(video)
-
-
-
-    print(
-        "STEP 4 DELETE VIDEO",
-        flush=True
-    )
-
-    delete_video()
-
-
+    try:
+        print("STEP 1 DOWNLOAD VIDEO", flush=True)
+        download_video(url)
+        print("STEP 2 DOWNLOAD SUBTITLE", flush=True)
+        download_subtitle(url)
+        video = find_video()
+        if not video:
+            raise RuntimeError("video not found")
+        print("STEP 3 SCREENSHOTS", flush=True)
+        extract_screenshots(video)
+    finally:
+        print("STEP 4 DELETE VIDEO", flush=True)
+        delete_video()
 
     show_output()
 
