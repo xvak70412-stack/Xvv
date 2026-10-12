@@ -6,6 +6,8 @@ import re
 import sys
 import time
 import math
+from urllib.request import getproxies
+from urllib.parse import urlsplit
 import yt_dlp
 from concurrent.futures import ThreadPoolExecutor
 from PIL import Image, ImageOps
@@ -92,18 +94,22 @@ def get_video_url():
 
 
 
-def ytdlp_command():
-    cmd = [sys.executable, "-m", "yt_dlp", "--newline",
-           "--progress-delta", "5", "--socket-timeout", "30",
-           "--retries", "3", "--fragment-retries", "3"]
-    cookies = Path(os.environ.get("YOUTUBE_COOKIES_PATH",
-                                 r"C:\actions-runner\secrets\cookies.txt"))
-    if cookies.is_file():
-        cmd += ["--cookies", str(cookies)]
-        print("Using configured cookies file", flush=True)
-    else:
-        print("Cookies file not found; trying public access", flush=True)
-    return cmd
+def get_network_proxy():
+    override = os.environ.get("YOUTUBE_PROXY")
+    proxies = getproxies()
+    proxy = override if override is not None else (
+        proxies.get("https") or proxies.get("http") or proxies.get("all") or ""
+    )
+    if proxy and "://" not in proxy:
+        proxy = "http://" + proxy
+    if proxy and urlsplit(proxy).scheme != "http":
+        raise RuntimeError(
+            "Remote capture requires an HTTP proxy endpoint. Set YOUTUBE_PROXY "
+            "to the HTTP endpoint of your existing proxy, or an empty value for direct access."
+        )
+    print("NETWORK: shared HTTP proxy" if proxy else "NETWORK: direct connection",
+          flush=True)
+    return proxy
 
 
 def get_remote_video(url):
@@ -112,6 +118,13 @@ def get_remote_video(url):
         "noplaylist": True,
         "socket_timeout": 30,
         "retries": 3,
+        "proxy": get_network_proxy(),
+        "writesubtitles": True,
+        "writeautomaticsub": True,
+        "subtitleslangs": ["zh-Hans", "zh", "en"],
+        "subtitlesformat": "vtt",
+        "skip_download": True,
+        "outtmpl": str(SUBTITLE_DIR / "subtitle.%(ext)s"),
     }
     cookies = Path(os.environ.get("YOUTUBE_COOKIES_PATH",
                                  r"C:\actions-runner\secrets\cookies.txt"))
@@ -137,50 +150,38 @@ def get_remote_video(url):
             headers["Cookie"] = cookie_header
         print(f"REMOTE VIDEO: {info.get('width')}x{info.get('height')}; "
               f"duration {duration}s; format {info.get('format_id')}", flush=True)
-        return {"url": stream_url, "duration": duration, "headers": headers}
+        return {"url": stream_url, "duration": duration, "headers": headers,
+                "proxy": options["proxy"], "info": info, "options": options}
 
 
-def download_subtitle(url):
-
-    SUBTITLE_DIR.mkdir(
-        parents=True,
-        exist_ok=True
-    )
-
-
-    output = SUBTITLE_DIR / "subtitle"
-
-
-    try:
-
-        run(ytdlp_command() + [
-
-            "--write-auto-subs",
-
-            "--write-subs",
-
-            "--sub-lang",
-            "zh-Hans,zh,en",
-
-            "--sub-format",
-            "vtt",
-
-            "--skip-download",
-
-            "-o",
-            str(output),
-
-            url
-        ])
+def download_subtitle(remote):
+    SUBTITLE_DIR.mkdir(parents=True, exist_ok=True)
+    subtitles = remote["info"].get("requested_subtitles") or {}
+    if not subtitles:
+        print("No requested subtitles available", flush=True)
+        return
+    # Reuse the existing metadata; do not request the YouTube page a second time.
+    with yt_dlp.YoutubeDL(remote["options"]) as ydl:
+        for language, subtitle in subtitles.items():
+            info = dict(remote["info"])
+            info["requested_subtitles"] = {language: dict(subtitle)}
+            try:
+                ydl.process_info(info)
+                print(f"SUBTITLE {language} SAVED", flush=True)
+            except Exception as error:
+                print(f"SUBTITLE {language} FAILED: {type(error).__name__}; "
+                      "other subtitles and screenshots will be retained", flush=True)
 
 
-    except Exception:
-
-        print(
-            "Subtitle download failed, continue",
-            flush=True
-        )
-
+def ffmpeg_error(stderr, remote):
+    message = stderr.decode("utf-8", errors="replace")
+    # Keep diagnostics while stripping access tokens, cookies and proxy credentials.
+    for secret in [remote["url"], remote.get("proxy", "")] + list(remote["headers"].values()):
+        if secret:
+            message = message.replace(str(secret), "[redacted]")
+    message = re.sub(r"https?://[^\s'\"]+", "[url]", message)
+    message = re.sub(r"(?im)^.*(?:cookie|authorization):.*$", "[private header]", message)
+    return message[-1800:].strip() or "No FFmpeg diagnostic output"
 
 
 def render_screenshot(output):
@@ -205,8 +206,19 @@ def extract_one_screenshot(remote, index, timestamp):
     )
     cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
            "-rw_timeout", "30000000"]
+    proxy = remote.get("proxy", "")
+    if proxy:
+        cmd += ["-http_proxy", proxy]
     if headers:
         cmd += ["-headers", headers]
+    child_env = os.environ.copy()
+    # FFmpeg also needs this for nested HLS segment and TLS requests.
+    for key in list(child_env):
+        if key.lower() in ("http_proxy", "https_proxy", "all_proxy"):
+            child_env.pop(key)
+    if proxy:
+        child_env["http_proxy"] = proxy
+        child_env["https_proxy"] = proxy
     cmd += [
         "-ss", str(timestamp), "-threads", "2", "-i", remote["url"],
         "-frames:v", "1", "-q:v", "2", "-threads", "1", str(raw)
@@ -214,9 +226,10 @@ def extract_one_screenshot(remote, index, timestamp):
     try:
         # Do not print signed stream URLs, request headers or cookies to logs.
         result = subprocess.run(cmd, stdout=subprocess.DEVNULL,
-                                stderr=subprocess.PIPE, timeout=120)
+                                stderr=subprocess.PIPE, timeout=120, env=child_env)
         if result.returncode:
-            raise RuntimeError(f"Remote capture failed (ffmpeg exit {result.returncode})")
+            raise RuntimeError(f"Remote capture failed (ffmpeg exit {result.returncode}): "
+                               f"{ffmpeg_error(result.stderr, remote)}")
         render_screenshot(raw)
         raw.replace(output)
     except subprocess.TimeoutExpired:
@@ -230,8 +243,16 @@ def extract_screenshots(url, remote):
     IMAGE_DIR.mkdir(parents=True, exist_ok=True)
     started = time.perf_counter()
     points = [remote["duration"] / 16 * (index + 1) for index in range(15)]
-    pending = list(range(15))
-    # Limit simultaneous remote requests; refresh signed URLs once on failure.
+    print("Testing remote capture on image 1/15 before scheduling the rest", flush=True)
+    try:
+        extract_one_screenshot(remote, 0, points[0])
+    except Exception as error:
+        raise RuntimeError(
+            f"Remote capture preflight failed: {error}. "
+            "Stopped before requesting the other 14 images; no full download attempted."
+        ) from None
+    pending = list(range(1, 15))
+    # Retry missing images using existing metadata to avoid repeated site extraction.
     workers = min(2, max(1, (os.cpu_count() or 2) // 2))
     for attempt in range(2):
         failures = []
@@ -244,7 +265,7 @@ def extract_screenshots(url, remote):
                 try:
                     future.result()
                 except Exception as error:
-                    print(f"SCREENSHOT {index + 1}/15 FAILED: {type(error).__name__}",
+                    print(f"SCREENSHOT {index + 1}/15 FAILED: {error}",
                           flush=True)
                     failures.append(index)
         if not failures:
@@ -252,9 +273,8 @@ def extract_screenshots(url, remote):
                   flush=True)
             return
         if attempt == 0:
-            print(f"Refreshing stream access; retrying {len(failures)} missing frames",
+            print(f"Retrying {len(failures)} missing frames with existing stream access",
                   flush=True)
-            remote = get_remote_video(url)
             pending = failures
     raise RuntimeError(
         f"Remote extraction failed for images {[index + 1 for index in failures]}; "
@@ -311,7 +331,7 @@ def main():
         print("STEP 1 READ VIDEO INFO (NO FULL DOWNLOAD)", flush=True)
         remote = get_remote_video(url)
         print("STEP 2 DOWNLOAD SUBTITLE", flush=True)
-        download_subtitle(url)
+        download_subtitle(remote)
         print("STEP 3 CAPTURE 15 REMOTE FRAMES", flush=True)
         extract_screenshots(url, remote)
     finally:
@@ -330,3 +350,4 @@ def main():
 if __name__ == "__main__":
 
     main()
+
