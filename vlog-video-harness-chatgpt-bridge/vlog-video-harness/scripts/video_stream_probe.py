@@ -33,6 +33,7 @@ def main():
                 report["yt_dlp"] = {"status": getattr(response, "status", None), "bytes": len(data), "ok": bool(data)}
     except Exception as error:
         report["yt_dlp"] = {"ok": False, "error_type": type(error).__name__, "status": getattr(error, "status", getattr(error, "code", None))}
+    headers["Range"] = "bytes=0-65535"
     header_block = "".join(f"{k}: {v}\r\n" for k,v in headers.items()
                            if "\r" not in str(k)+str(v) and "\n" not in str(k)+str(v))
     cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-rw_timeout", "30000000"]
@@ -49,8 +50,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix="video-stream-probe-") as folder:
         target = Path(folder) / "probe.bin"
         # Raw data demuxer avoids codec parsing; limit the HTTP range and output.
-        cmd += ["-start_offset", "0", "-end_offset", str(LIMIT),
-                "-f", "data", "-i", remote["url"], "-map", "0:0",
+        cmd += ["-f", "data", "-i", remote["url"], "-map", "0:0",
                 "-c", "copy", "-fs", str(LIMIT), "-f", "data", str(target)]
         try:
             result = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
