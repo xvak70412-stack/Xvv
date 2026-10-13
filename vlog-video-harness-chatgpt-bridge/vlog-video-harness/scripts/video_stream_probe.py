@@ -49,6 +49,27 @@ def inspect_metadata(remote):
               "proxy_bypass_for_video_host": proxy_bypass_environment(urlsplit(remote["url"]).hostname or ""),
               "formats": [describe(f) for f in info.get("formats", [])
                           if f.get("height") == 1080 and f.get("url")][:20]}
+    event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text(encoding="utf-8"))
+    if "[response-headers]" in (event.get("issue", {}).get("body") or ""):
+        options = dict(remote["options"], logger=QuietLogger())
+        try:
+            with yt_dlp.YoutubeDL(options) as ydl:
+                with ydl.urlopen(Request(remote["url"], headers=remote["headers"], method="HEAD")) as response:
+                    report["head_status"] = getattr(response, "status", None)
+                    report["response_headers"] = {k: response.headers.get(k) for k in
+                        ("Server", "Date", "Content-Type", "Content-Length") if response.headers.get(k)}
+        except Exception as error:
+            report["head_status"] = getattr(error, "status", getattr(error, "code", None))
+            response = getattr(error, "response", None)
+            hdrs = getattr(response, "headers", None)
+            report["response_headers"] = {k: hdrs.get(k) for k in
+                ("Server", "Date", "Content-Type", "Content-Length") if hdrs is not None and hdrs.get(k)}
+            if response is not None:
+                response.close()
+        date = report.get("response_headers", {}).get("Date")
+        if date:
+            from email.utils import parsedate_to_datetime
+            report["server_clock_difference_seconds"] = round(parsedate_to_datetime(date).timestamp() - time.time())
     print("STREAM_METADATA_RESULT=" + json.dumps(report, ensure_ascii=False), flush=True)
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
