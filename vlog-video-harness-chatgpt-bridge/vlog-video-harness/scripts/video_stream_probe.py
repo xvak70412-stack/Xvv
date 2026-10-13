@@ -16,9 +16,53 @@ class QuietLogger:
     def warning(self, message): pass
     def error(self, message): pass
 
+
+def inspect_metadata(remote):
+    import time
+    from urllib.parse import urlsplit, parse_qs
+    from urllib.request import proxy_bypass_environment
+    from yt_dlp.version import __version__
+    params = parse_qs(urlsplit(remote["url"]).query)
+    def safe_client(value):
+        return value if isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9_. -]{1,100}", value) else None
+    def describe(info):
+        query = parse_qs(urlsplit(info.get("url", "")).query)
+        expiry = query.get("expire", [""])[0]
+        return {
+            "format": info.get("format_id"), "height": info.get("height"),
+            "protocol": info.get("protocol"),
+            "client": safe_client(query.get("c", [""])[0]),
+            "extractor_client": safe_client(info.get("__yt_dlp_client")),
+            "signature_present": any(query.get(key) for key in ("sig", "signature", "lsig")),
+            "n_parameter_present": bool(query.get("n")),
+            "po_token_present": bool(query.get("pot")),
+            "ip_binding_present": bool(query.get("ip")),
+            "expires_in_seconds": int(expiry) - int(time.time()) if expiry.isdigit() else None,
+            "googlevideo_host": (urlsplit(info.get("url", "")).hostname or "").endswith(".googlevideo.com"),
+        }
+    info = remote["info"]
+    report = {"yt_dlp_version": __version__, "selected": describe(info),
+              "cookies_file_exists": Path(remote["options"].get("cookiefile", "")).is_file(),
+              "matching_stream_cookie": bool(remote["headers"].get("Cookie")),
+              "shared_proxy": bool(remote["proxy"]),
+              "proxy_bypass_for_youtube": proxy_bypass_environment("www.youtube.com"),
+              "proxy_bypass_for_video_host": proxy_bypass_environment(urlsplit(remote["url"]).hostname or ""),
+              "formats": [describe(f) for f in info.get("formats", [])
+                          if f.get("height") == 1080 and f.get("url")][:20]}
+    print("STREAM_METADATA_RESULT=" + json.dumps(report, ensure_ascii=False), flush=True)
+    summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary:
+        with open(summary, "a", encoding="utf-8") as out:
+            out.write("## Stream metadata diagnostics\n\n```json\n" + json.dumps(report, indent=2) + "\n```\n")
+
+
 def main():
     report = {"video": "3WMuzhQXJoY", "read_limit_bytes": LIMIT}
     remote = job.get_remote_video("https://www.youtube.com/watch?v=3WMuzhQXJoY")
+    event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text(encoding="utf-8"))
+    if "[metadata-only]" in (event.get("issue", {}).get("body") or ""):
+        inspect_metadata(remote)
+        return
     headers = dict(remote["headers"])
     report["format"] = remote["info"].get("format_id")
     report["protocol"] = remote["info"].get("protocol")
