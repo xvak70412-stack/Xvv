@@ -1,0 +1,81 @@
+name: Focused Quote Frames CRE
+on:
+  issues:
+    types: [opened]
+permissions:
+  contents: read
+jobs:
+  capture:
+    if: contains(github.event.issue.body, '[focused-quote-frames-cre]')
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 5
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - name: Configure GitHub proxy before checkout
+        run: |
+          @'
+          import os
+          from urllib.request import getproxies
+          from urllib.parse import urlsplit
+          
+          proxies = getproxies()
+          proxy = os.environ.get("GITHUB_PROXY")
+          if proxy is None:
+              proxy = os.environ.get("YOUTUBE_PROXY")
+          if proxy is None:
+              proxy = proxies.get("https") or proxies.get("http") or proxies.get("all") or ""
+          if proxy and "://" not in proxy:
+              proxy = "http://" + proxy
+          if any(character in proxy for character in ("\r", "\n")):
+              raise SystemExit("Invalid proxy value")
+          if proxy:
+              if urlsplit(proxy).scheme not in ("http", "https", "socks5", "socks5h"):
+                  raise SystemExit("Unsupported Git proxy scheme")
+              print("::add-mask::" + proxy)
+              count = int(os.environ.get("GIT_CONFIG_COUNT", "0"))
+              values = {
+                  "HTTP_PROXY": proxy,
+                  "HTTPS_PROXY": proxy,
+                  "GIT_CONFIG_COUNT": str(count + 1),
+                  f"GIT_CONFIG_KEY_{count}": "http.https://github.com/.proxy",
+                  f"GIT_CONFIG_VALUE_{count}": proxy,
+              }
+              with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as output:
+                  for key, value in values.items():
+                      output.write(key + "=" + value + "\n")
+              print("GitHub checkout will use the detected proxy")
+          else:
+              print("No system proxy detected; GitHub checkout will use existing Git network settings")
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { throw "Proxy configuration failed" }
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Capture interview frame before advertisement
+        env:
+          PYTHONUNBUFFERED: "1"
+          PYTHONUTF8: "1"
+          YOUTUBE_COOKIES_PATH: C:\actions-runner\secrets\cookies.txt
+        run: |
+          @'
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, str(Path("vlog-video-harness-chatgpt-bridge/vlog-video-harness/scripts").resolve()))
+          import github_job_windows as job
+          job.IMAGE_DIR = Path("quote-source-frame")
+          job.IMAGE_DIR.mkdir(exist_ok=True)
+          remote = job.get_remote_video("https://www.youtube.com/watch?v=CREUWYxrGPs")
+          for index, timestamp in enumerate([108, 268, 1510, 1521, 1640, 1676, 1664, 1784, 889, 716, 1856, 1818, 1826, 1649, 1815]):
+              job.extract_one_screenshot(remote, index, timestamp)
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { throw "Replacement frame capture failed" }
+      - name: Upload replacement frame
+        uses: actions/upload-artifact@v4
+        with:
+          name: quote-source-frame-${{ github.event.issue.number }}
+          path: quote-source-frame/*.jpg
+          retention-days: 7
